@@ -540,7 +540,7 @@ fn alarm_check() {
     std::fs::create_dir_all(&dest).unwrap();
     let three = "a|1|07:30|127||5||||起床\na|1|09:00|31||5||||周会提醒\na|0|22:15|0|2026-11-15|5||||睡前一刻\n";
     let due = "a|1|10:28|127||5||||该起来了\n";
-    for (scene, body) in [(0usize, ""), (1usize, three), (2usize, three), (3usize, due)] {
+    for (scene, body) in [(0usize, ""), (1usize, three), (2usize, three), (3usize, due), (4usize, three)] {
         std::fs::write(data.join("alarms.txt"), body).unwrap();
         let ctx = egui::Context::default();
         let mut app = App::new(&ctx, Options { fetch_lyrics: false, pet_idle: 45.0 });
@@ -552,6 +552,7 @@ fn alarm_check() {
             app.show_page(9);
             if scene == 2 { app.demo_alarm_editor(&env); }
             if scene == 3 { app.demo_alarm_ring(); }
+            if scene == 4 { app.demo_alarm_countdown(); }
             if frame == 39 {
                 eprintln!("scene {scene} page={} alarms={:?}", app.page(), std::fs::read_to_string(daozai::model::config_dir().join("alarms.txt")).map(|t| t.len()));
             }

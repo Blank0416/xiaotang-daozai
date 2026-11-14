@@ -9,6 +9,23 @@ use crate::paint::{self, capsule, Card, H};
 use crate::theme::{self, size, W};
 use eframe::egui::{self, Color32, Pos2, Rect};
 
+/// 滚轮两列的横坐标（面板局部逻辑点）。
+fn wheel_column(column: usize) -> f32 {
+    if column == 0 { 206.0 } else { 290.0 }
+}
+
+/// 把「还有多少分钟」说成人话。
+fn human_left(minutes: i64) -> String {
+    let m = minutes.max(0);
+    if m < 60 {
+        format!("{m} 分钟后")
+    } else if m < 24 * 60 {
+        format!("{} 小时 {} 分钟后", m / 60, m % 60)
+    } else {
+        format!("{} 天后", m / (24 * 60))
+    }
+}
+
 /// 小闹钟图标：表盘 + 两根指针。
 fn clock_icon(c: &Card, x: f32, y: f32, r: f32, color: Color32) {
     c.ring(x, y, r, 1.3, color);
@@ -33,8 +50,10 @@ impl App {
             Some(alarm) => {
                 let w = c.text(42.0, 61.0, &alarm.time_text(), size::HERO, W::Bold, theme::WHITE, H::Left);
                 c.text(42.0 + w + 5.0, 60.0, &alarm.repeat_text(), size::TINY, W::Semibold, theme::YELLOW, H::Left);
+                let left = alarm.minutes_until(&env.today, &now_hm).unwrap_or(0).max(0);
                 let when = alarm.next_text(&env.today, &now_hm);
-                c.text(42.0, 78.0, &c.fit(&when, size::SMALL, W::Regular, 146.0), size::SMALL, W::Regular, theme::GRAY, H::Left);
+                let sub = if left < 24 * 60 { format!("{} · {}", when, human_left(left)) } else { when };
+                c.text(42.0, 78.0, &c.fit(&sub, size::SMALL, W::Regular, 146.0), size::SMALL, W::Regular, theme::GRAY, H::Left);
             }
             None => {
                 c.text(42.0, 61.0, "--:--", size::HERO, W::Bold, theme::DIM, H::Left);
@@ -51,9 +70,13 @@ impl App {
         // 倒计时：最常见的时长，点一下就到点提醒。
         let (cd, cdc) = capsule(c, 121.0, 96.0, 68.0, 26.0, "alarm-countdown", theme::BTN, theme::BTN_HOVER);
         clock_icon(&cdc, 135.0, 109.0, 6.0, theme::WHITE);
-        cdc.text(146.0, 112.5, "30 分", size::BODY, W::Regular, theme::WHITE, H::Left);
+        cdc.text(146.0, 112.5, "倒计时", size::BODY, W::Regular, theme::WHITE, H::Left);
         if cd.clicked() {
-            self.add_countdown(env, 30);
+            self.alarm_countdown = true;
+            self.alarm_pos = [0, 30];
+            self.alarm_wheel = [0.0; 2];
+            self.alarm_drag = [0.0; 2];
+            self.alarm_focus = true;
         }
 
         c.fill(196.0, 31.0, 181.0, 93.0, 12.0, theme::CARD);
@@ -141,6 +164,15 @@ impl App {
         self.open_alarm_draft(Draft::one_shot(&env.today, 7, 30));
     }
 
+    /// 自检与演示用：直接打开倒计时弹层。
+    pub fn demo_alarm_countdown(&mut self) {
+        self.alarm_countdown = true;
+        self.alarm_pos = [0, 30];
+        self.alarm_wheel = [0.0; 2];
+        self.alarm_drag = [0.0; 2];
+        self.alarm_focus = true;
+    }
+
     /// 自检与演示用：直接摆出响铃界面。
     pub fn demo_alarm_ring(&mut self) {
         let (label, time) = self
@@ -212,90 +244,22 @@ impl App {
         }
 
         // 右卡片：时间滚轮 —— 和待办提醒同一套交互（滚轮 / 拖动 / 点选），带滚动动画。
-        let ctx = c.ui.ctx();
-        let mut pos = self.alarm_pos;
-        for (column, (x, width)) in [(206.0, 78.0), (290.0, 78.0)].into_iter().enumerate() {
-            let response = c.hit_drag(x, 52.0, width, 52.0, ("alarm-wheel", column));
-            if response.hovered() {
-                let (delta, now) = ctx.input(|i| {
-                    let delta = i
-                        .events
-                        .iter()
-                        .filter_map(|event| match event {
-                            egui::Event::MouseWheel { unit, delta, modifiers } if !modifiers.ctrl && !modifiers.command => {
-                                Some(-delta.y * if *unit == egui::MouseWheelUnit::Point { 1.0 } else { 40.0 })
-                            }
-                            _ => None,
-                        })
-                        .sum::<f32>();
-                    (delta, i.time)
-                });
-                if delta != 0.0 {
-                    if now - self.alarm_wheel_at[column] > 0.25 || self.alarm_wheel[column] * delta < 0.0 {
-                        self.alarm_wheel[column] = 0.0;
-                    }
-                    self.alarm_wheel_at[column] = now;
-                    self.alarm_wheel[column] += delta;
-                    let steps = (self.alarm_wheel[column] / 40.0).trunc() as i64;
-                    self.alarm_wheel[column] -= steps as f32 * 40.0;
-                    pos[column] += steps;
-                    ctx.input_mut(|i| {
-                        i.raw_scroll_delta = egui::Vec2::ZERO;
-                        i.smooth_scroll_delta = egui::Vec2::ZERO;
-                    });
-                }
-            }
-            if response.drag_started() {
-                self.alarm_drag[column] = 0.0;
-            }
-            if response.dragged() {
-                self.alarm_drag[column] -= response.drag_delta().y / c.s;
-                let steps = (self.alarm_drag[column] / 20.0).trunc() as i64;
-                self.alarm_drag[column] -= steps as f32 * 20.0;
-                pos[column] += steps;
-            }
-            if response.clicked() {
-                if let Some(p) = response.interact_pointer_pos() {
-                    let y = c.to_local(p).y;
-                    if y < 67.0 {
-                        pos[column] -= 1;
-                    } else if y > 85.0 {
-                        pos[column] += 1;
-                    }
-                }
-            }
-            response.on_hover_text(if column == 0 { "小时 · 滚轮、上下拖动或点选调整" } else { "分钟 · 滚轮、上下拖动或点选调整" });
+        for column in 0..2 {
+            self.wheel_input(c, column, wheel_column(column), 78.0);
         }
-        self.alarm_pos = pos;
-        let hour = pos[0].rem_euclid(24) as u8;
-        let minute = pos[1].rem_euclid(60) as u8;
+        let hour = self.alarm_pos[0].rem_euclid(24) as u8;
+        let minute = self.alarm_pos[1].rem_euclid(60) as u8;
         if let Some(d) = self.alarm_edit.as_mut() {
             d.hour = hour;
             d.minute = minute;
         }
-        c.fill(196.0, 31.0, 181.0, 93.0, 12.0, theme::CARD);
-        c.text(204.0, 45.0, "时间", 9.5, W::Regular, theme::GRAY, H::Left);
-        if draft.repeat == 0 {
+        let day_hint = if draft.repeat == 0 {
             let now_hm = env.clock.get(..5).unwrap_or("");
-            let label = if format!("{hour:02}:{minute:02}").as_str() > now_hm { "今天" } else { "明天" };
-            c.text(369.0, 45.0, label, 9.5, W::Regular, theme::DIM, H::Right);
-        }
-        c.fill(202.0, 65.0, 169.0, 22.0, 7.0, Color32::from_rgb(42, 42, 46));
-        for y in [72.0, 80.0] {
-            c.circle(287.0, y, 0.9, theme::WHITE);
-        }
-        for (column, (x, width)) in [(206.0, 78.0), (290.0, 78.0)].into_iter().enumerate() {
-            let value = ctx.animate_value_with_time(egui::Id::new(("alarm-wheel-value", column)), pos[column] as f32, if self.alarm_focus { 0.0 } else { 0.13 });
-            let clipped = c.clipped(x, 52.0, width, 45.0);
-            for step in value.floor() as i64 - 1..=value.floor() as i64 + 2 {
-                let distance = step as f32 - value;
-                let strength = (1.0 - distance.abs() * 0.55).clamp(0.0, 1.0);
-                let size = 10.0 + (17.0 - 10.0) * strength;
-                let color = Color32::from_gray((80.0 + 175.0 * strength) as u8);
-                let text = if column == 0 { format!("{:02}", step.rem_euclid(24)) } else { format!("{:02}", step.rem_euclid(60)) };
-                clipped.centered_text(x + width / 2.0, 76.0 + distance * 18.0, &text, size, if strength > 0.7 { W::Semibold } else { W::Regular }, color, H::Center);
-            }
-        }
+            if format!("{hour:02}:{minute:02}").as_str() > now_hm { "今天" } else { "明天" }
+        } else {
+            ""
+        };
+        self.draw_wheel_card(c, "时间", day_hint);
         self.alarm_focus = false;
         if c.hit(228.0, 100.0, 64.0, 20.0, "alarm-cancel").clicked() {
             self.alarm_edit = None;
@@ -449,5 +413,127 @@ impl App {
             self.forced_open_until = self.forced_open_until.max(self.t + 5.0);
         }
         self.alarm_player.tick(self.t);
+    }
+
+    /// 时间滚轮的输入：滚轮、拖动、点上下两行，都累加进 `alarm_pos[column]`。
+    fn wheel_input(&mut self, c: &Card, column: usize, x: f32, width: f32) {
+        let ctx = c.ui.ctx();
+        let response = c.hit_drag(x, 52.0, width, 52.0, ("alarm-wheel", column));
+        if response.hovered() {
+            let (delta, now) = ctx.input(|i| {
+                let delta = i
+                    .events
+                    .iter()
+                    .filter_map(|event| match event {
+                        egui::Event::MouseWheel { unit, delta, modifiers } if !modifiers.ctrl && !modifiers.command => {
+                            Some(-delta.y * if *unit == egui::MouseWheelUnit::Point { 1.0 } else { 40.0 })
+                        }
+                        _ => None,
+                    })
+                    .sum::<f32>();
+                (delta, i.time)
+            });
+            if delta != 0.0 {
+                if now - self.alarm_wheel_at[column] > 0.25 || self.alarm_wheel[column] * delta < 0.0 {
+                    self.alarm_wheel[column] = 0.0;
+                }
+                self.alarm_wheel_at[column] = now;
+                self.alarm_wheel[column] += delta;
+                let steps = (self.alarm_wheel[column] / 40.0).trunc() as i64;
+                self.alarm_wheel[column] -= steps as f32 * 40.0;
+                self.alarm_pos[column] += steps;
+                ctx.input_mut(|i| {
+                    i.raw_scroll_delta = egui::Vec2::ZERO;
+                    i.smooth_scroll_delta = egui::Vec2::ZERO;
+                });
+            }
+        }
+        if response.drag_started() {
+            self.alarm_drag[column] = 0.0;
+        }
+        if response.dragged() {
+            self.alarm_drag[column] -= response.drag_delta().y / c.s;
+            let steps = (self.alarm_drag[column] / 20.0).trunc() as i64;
+            self.alarm_drag[column] -= steps as f32 * 20.0;
+            self.alarm_pos[column] += steps;
+        }
+        if response.clicked() {
+            if let Some(p) = response.interact_pointer_pos() {
+                let y = c.to_local(p).y;
+                if y < 67.0 {
+                    self.alarm_pos[column] -= 1;
+                } else if y > 85.0 {
+                    self.alarm_pos[column] += 1;
+                }
+            }
+        }
+        response.on_hover_text(if column == 0 { "小时 · 滚轮、上下拖动或点选调整" } else { "分钟 · 滚轮、上下拖动或点选调整" });
+    }
+
+    /// 时间滚轮的外观：标题、右上角提示、选中带、两个冒号点、三行数字（中间选中）。
+    fn draw_wheel_card(&self, c: &Card, title: &str, hint: &str) {
+        c.fill(196.0, 31.0, 181.0, 93.0, 12.0, theme::CARD);
+        c.text(204.0, 45.0, title, 9.5, W::Regular, theme::GRAY, H::Left);
+        if !hint.is_empty() {
+            c.text(369.0, 45.0, hint, 9.5, W::Regular, theme::DIM, H::Right);
+        }
+        c.fill(202.0, 65.0, 169.0, 22.0, 7.0, Color32::from_rgb(42, 42, 46));
+        for y in [72.0, 80.0] {
+            c.circle(287.0, y, 0.9, theme::WHITE);
+        }
+        let ctx = c.ui.ctx();
+        for column in 0..2 {
+            let x = wheel_column(column);
+            let value = ctx.animate_value_with_time(
+                egui::Id::new(("alarm-wheel-value", column)),
+                self.alarm_pos[column] as f32,
+                if self.alarm_focus { 0.0 } else { 0.13 },
+            );
+            let radix = if column == 0 { 24 } else { 60 };
+            let clipped = c.clipped(x, 52.0, 78.0, 45.0);
+            for step in value.floor() as i64 - 1..=value.floor() as i64 + 2 {
+                let distance = step as f32 - value;
+                let strength = (1.0 - distance.abs() * 0.55).clamp(0.0, 1.0);
+                let size = 10.0 + (17.0 - 10.0) * strength;
+                let color = Color32::from_gray((80.0 + 175.0 * strength) as u8);
+                let text = format!("{:02}", step.rem_euclid(radix));
+                clipped.centered_text(x + 39.0, 76.0 + distance * 18.0, &text, size, if strength > 0.7 { W::Semibold } else { W::Regular }, color, H::Center);
+            }
+        }
+    }
+
+    /// 倒计时弹层：左边常用时长，右边自定义「时 / 分」。
+    pub(crate) fn draw_countdown_editor(&mut self, c: &Card, env: &Env) {
+        let w = c.text(15.0, 25.0, "倒计时", size::TITLE, W::Bold, theme::WHITE, H::Left);
+        c.text(15.0 + w + 3.0, 26.0, "到点响铃", size::TINY, W::Regular, theme::GRAY, H::Left);
+        c.text(41.0, 60.0, "常用时长", 10.5, W::Regular, theme::GRAY, H::Left);
+        let total = self.alarm_pos[0].rem_euclid(24) * 60 + self.alarm_pos[1].rem_euclid(60);
+        let presets = [("5 分钟", 5i64), ("15 分钟", 15), ("30 分钟", 30), ("1 小时", 60)];
+        for (index, (label, minutes)) in presets.iter().enumerate() {
+            let x = 41.0 + (index % 2) as f32 * 74.0;
+            let y = 68.0 + (index / 2) as f32 * 24.0;
+            if setting_button(c, x, y, 70.0, label, total == *minutes, &format!("countdown-preset-{minutes}")) {
+                self.alarm_pos = [minutes / 60, minutes % 60];
+            }
+        }
+
+        for column in 0..2 {
+            self.wheel_input(c, column, wheel_column(column), 78.0);
+        }
+        let hour = self.alarm_pos[0].rem_euclid(24);
+        let minute = self.alarm_pos[1].rem_euclid(60);
+        self.draw_wheel_card(c, "时长", "也可自己滚时 / 分");
+        self.alarm_focus = false;
+        if c.hit(228.0, 100.0, 64.0, 20.0, "countdown-cancel").clicked() {
+            self.alarm_countdown = false;
+        }
+        c.centered_text(260.0, 110.0, "取消", 10.0, W::Regular, theme::GRAY, H::Center);
+        let minutes_total = (hour * 60 + minute) as u32;
+        let (start, sb) = capsule(c, 302.0, 100.0, 66.0, 20.0, "countdown-start", Color32::from_rgb(10, 132, 255), Color32::from_rgb(35, 150, 255));
+        sb.centered_text(335.0, 110.0, "开始", 10.0, W::Semibold, theme::WHITE, H::Center);
+        if start.clicked() && minutes_total > 0 {
+            self.alarm_countdown = false;
+            self.add_countdown(env, minutes_total);
+        }
     }
 }
