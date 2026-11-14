@@ -5660,6 +5660,20 @@ fn calendar_sync_result_does_not_enqueue_another_sync() {
 }
 
 #[test]
+fn page_transition_settles_instead_of_sticking_half_way() {
+    let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());let mut h=H::new();
+    h.app.show_page(0);h.frame(vec![]);
+    assert!(h.app.transition_idle(),"静止时不应有转场位移");
+    // 带过渡切页：刚切过去时位移还没收，等于「画面滑到一半」的状态。
+    h.app.go(9,1.0);
+    assert!(!h.app.transition_idle(),"刚切页时应当处于转场中");
+    // 响铃 / 点停止走 settle_page：必须一次性收干净，否则界面会永久停在半截帧。
+    h.app.settle_page();
+    assert!(h.app.transition_idle(),"settle_page 之后不应残留任何转场位移");
+    assert_eq!(h.app.page,9);
+}
+
+#[test]
 fn page_order_persists_and_controls_navigation() {
     let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
     let mut h=H::new();

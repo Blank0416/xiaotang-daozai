@@ -210,7 +210,7 @@ impl App {
             .first()
             .map(|alarm| (alarm.label.clone(), alarm.time_text()))
             .unwrap_or_else(|| ("起床".to_string(), "07:30".to_string()));
-        self.alarm_ring = Some(Ringing { index: 0, label, time, since: 0.0, snoozed: false });
+        self.alarm_ring = Some(Ringing { index: 0, label, time, since: 0.0, ringing: true, retry_at: 0.0, snoozed: false });
         self.open = true;
     }
 
@@ -378,7 +378,16 @@ impl App {
         c.text(15.0 + w + 2.0, 25.0, "时间到", size::TITLE, W::Bold, theme::YELLOW, H::Left);
         let glow = c.scaled(209.0, 62.0, 1.0 + pulse * 0.03);
         glow.text(209.0, 70.0, &ring.time, 34.0, W::Bold, theme::WHITE, H::Center);
-        let label = if ring.label.trim().is_empty() { "时间到了".to_string() } else { ring.label.clone() };
+        c.ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+        let label = if !ring.ringing && self.alarms.retry_min > 0 {
+            format!("铃声已停 · {} 分钟后再响", self.alarms.retry_min)
+        } else if !ring.ringing {
+            "铃声已停 · 点停止关掉".to_string()
+        } else if ring.label.trim().is_empty() {
+            "时间到了".to_string()
+        } else {
+            ring.label.clone()
+        };
         c.text(209.0, 88.0, &c.fit(&label, size::BODY, W::Regular, 300.0), size::BODY, W::Regular, theme::GRAY, H::Center);
         let snooze = self.alarms.items.get(ring.index).map(|alarm| alarm.snooze_min).unwrap_or(self.alarms.snooze_min);
         if setting_button(c, 96.0, 104.0, 106.0, &format!("贪睡 {snooze} 分"), false, "alarm-snooze-now") {
@@ -395,13 +404,20 @@ impl App {
             self.alarms.snooze(ring.index, now, minutes);
         }
         self.alarm_player.stop();
+        self.settle_page();
+        self.forced_open_until = 0.0;
         self.say(format!("{minutes} 分钟后再提醒"));
     }
 
     fn dismiss_alarm(&mut self) {
-        if self.alarm_ring.take().is_some() {
+        let was_ringing = self.alarm_ring.take().is_some();
+        if was_ringing {
             self.alarm_player.stop();
         }
+        // 回到闹钟主页时把转场状态归零：以前这里会留下滑了一半的位移，
+        // 界面就停在半截帧上（左栏被切掉、像卡死），现在无条件复位。
+        self.settle_page();
+        self.forced_open_until = 0.0;
     }
 
     /// 每帧调度：到点响铃、铃声续播。
@@ -422,20 +438,46 @@ impl App {
                         label: alarm.label.clone(),
                         time: alarm.time_text(),
                         since: self.t,
+                        ringing: true,
+                        retry_at: 0.0,
                         snoozed: false,
                     };
                     let file = alarm.ring_file(self.alarms.default_ring()).to_string();
-                    self.alarm_player.start(&file, self.alarms.volume, self.alarms.loop_ring);
+                    self.alarm_player.start(&file, self.alarms.volume, true);
                     self.alarm_ring = Some(ring);
                     self.open = true;
                     self.forced_open_until = self.t + 600.0;
-                    self.go(ALARM_PAGE, 1.0);
+                    // 直接落位到闹钟页：走转场的话，响铃头 0.5 秒会露出上一页的残影。
+                    self.jump_page(ALARM_PAGE);
                 }
             }
         }
-        if self.alarm_ring.is_some() {
-            // 响铃期间不让岛自己收起来。
-            self.forced_open_until = self.forced_open_until.max(self.t + 5.0);
+        if let Some(mut ring) = self.alarm_ring.clone() {
+            let len = self.alarms.ring_len.min(crate::alarm::RING_LEN_MAX) as f64;
+            let retry = self.alarms.retry_min.min(crate::alarm::RETRY_MAX) as f64 * 60.0;
+            if ring.ringing {
+                // 到了设定时长：先安静，再等着下一轮。
+                if len > 0.0 && self.t - ring.since >= len {
+                    ring.ringing = false;
+                    ring.retry_at = if retry > 0.0 { self.t + retry } else { f64::MAX };
+                    self.alarm_player.stop();
+                }
+            } else if retry > 0.0 && self.t >= ring.retry_at {
+                let file = self
+                    .alarms
+                    .items
+                    .get(ring.index)
+                    .map(|alarm| alarm.ring_file(self.alarms.default_ring()).to_string())
+                    .unwrap_or_else(|| self.alarms.default_ring().to_string());
+                self.alarm_player.start(&file, self.alarms.volume, true);
+                ring.ringing = true;
+                ring.since = self.t;
+                ring.retry_at = 0.0;
+            }
+            // 响铃（含静音等待）期间不让岛自己收起来。
+            let keep = if ring.ringing { 5.0 } else { 2.0 };
+            self.forced_open_until = self.forced_open_until.max(self.t + keep);
+            self.alarm_ring = Some(ring);
         }
         self.alarm_player.tick(self.t);
     }

@@ -1550,6 +1550,40 @@ impl App {
         self.cancel_edit();
     }
 
+    /// 不带过渡地直接落位到某页（闹钟响铃、出错回退时用）。
+    ///
+    /// 走 go() 的话会留下 0.55 秒的转场；如果这期间界面停止重绘，画面就会永久停在
+    /// 滑了一半的那一帧上（看起来像整块 UI 坏了）。这里把转场状态一次性归零。
+    pub(crate) fn jump_page(&mut self, page: usize) {
+        if !self.settings.visible_pages[page] {
+            return;
+        }
+        self.music_volume_open = false;
+        self.subpage = None;
+        self.cancel_edit();
+        self.page_from = page;
+        self.page = page;
+        self.page_dir = 0.0;
+        self.page_t0 = self.t - 10.0;
+        self.slide.pos = 0.0;
+        self.slide.target = 0.0;
+        self.dots_target();
+    }
+
+    /// 测试用：当前是否没有残留的转场位移（响铃 / 停止后应为 true）。
+    pub(crate) fn transition_idle(&self) -> bool {
+        self.page_from == self.page && self.slide.pos.abs() < 0.01 && self.page_e() > 0.55
+    }
+
+    /// 把当前页的转场状态直接收束掉（不换页），保证画面不会停在滑了一半的帧上。
+    pub(crate) fn settle_page(&mut self) {
+        self.page_from = self.page;
+        self.page_dir = 0.0;
+        self.page_t0 = self.t - 10.0;
+        self.slide.pos = 0.0;
+        self.slide.target = 0.0;
+    }
+
     fn page_e(&self) -> f32 {
         (self.t - self.page_t0) as f32
     }
@@ -2779,6 +2813,8 @@ impl App {
         let e = self.page_e();
         let in_tx = e < 0.55 && self.page_from != self.page;
         if in_tx {
+            // 转场靠时间推进：期间必须保证持续重绘，否则窗口一停下就永久停在半截帧上。
+            c.ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
             // 旧页：原地向反方向轻移并快速淡出；新页：弹簧滑入 + 稍晚淡入
             let old_a = 1.0 - smoothstep(0.0, 0.16, e);
             let new_a = smoothstep(0.03, 0.28, e);

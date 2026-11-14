@@ -19,6 +19,8 @@ pub const REPEAT_WEEKEND: u8 = 0b110_0000;
 /// Windows 自带铃声；用户没选铃声时用它。
 pub const DEFAULT_RING: &str = r"C:\Windows\Media\Alarm01.wav";
 pub const SNOOZE_MIN: u32 = 1;
+pub const RING_LEN_MAX: u32 = 600;
+pub const RETRY_MAX: u32 = 60;
 pub const SNOOZE_MAX: u32 = 60;
 
 fn hhmm_to_min(text: &str) -> Option<u32> {
@@ -232,8 +234,12 @@ pub struct AlarmList {
     pub ring_file: String,
     /// 新建闹钟默认贪睡分钟。
     pub snooze_min: u32,
-    /// 响到手动停（否则只响一遍铃声）。
+    /// 响到手动停（兼容旧配置；新逻辑用 ring_len）。
     pub loop_ring: bool,
+    /// 单次响铃时长（秒）；0 = 一直响到点停止。
+    pub ring_len: u32,
+    /// 响过一轮后没停，隔多少分钟再响；0 = 不再响。
+    pub retry_min: u32,
     /// 列表滚动位置（下标）。
     pub scroll: usize,
 }
@@ -250,7 +256,7 @@ impl AlarmList {
     }
 
     fn fresh() -> Self {
-        Self { items: Vec::new(), volume: 80, ring_file: String::new(), snooze_min: 5, loop_ring: true, scroll: 0 }
+        Self { items: Vec::new(), volume: 80, ring_file: String::new(), snooze_min: 5, loop_ring: true, ring_len: 0, retry_min: 5, scroll: 0 }
     }
 
     pub fn default_ring(&self) -> &str {
@@ -277,6 +283,8 @@ impl AlarmList {
                     "ring" => list.ring_file = value.to_string(),
                     "snooze" => list.snooze_min = value.parse::<u32>().unwrap_or(5).clamp(SNOOZE_MIN, SNOOZE_MAX),
                     "loop" => list.loop_ring = value != "0",
+                    "ringlen" => list.ring_len = value.parse::<u32>().unwrap_or(0).min(RING_LEN_MAX),
+                    "retry" => list.retry_min = value.parse::<u32>().unwrap_or(5).min(RETRY_MAX),
                     _ => {}
                 }
                 continue;
@@ -312,6 +320,8 @@ impl AlarmList {
         out.push_str(&format!("@ring|{}\n", clean(&self.ring_file)));
         out.push_str(&format!("@snooze|{}\n", self.snooze_min.clamp(SNOOZE_MIN, SNOOZE_MAX)));
         out.push_str(&format!("@loop|{}\n", if self.loop_ring { 1 } else { 0 }));
+        out.push_str(&format!("@ringlen|{}\n", self.ring_len.min(RING_LEN_MAX)));
+        out.push_str(&format!("@retry|{}\n", self.retry_min.min(RETRY_MAX)));
         for alarm in &self.items {
             out.push_str(&format!(
                 "a|{}|{}|{}|{}|{}|{}|{}|{}|{}\n",
@@ -382,8 +392,12 @@ pub struct Ringing {
     pub index: usize,
     pub label: String,
     pub time: String,
-    /// 开始响的时刻（秒，界面动效用）。
+    /// 本轮开始响的时刻（秒，界面动效用；也用来算响铃时长）。
     pub since: f64,
+    /// 这一轮是否正在出声（响完设定时长后会变 false，等下次再响）。
+    pub ringing: bool,
+    /// 静音期间下一轮再响的时刻（秒）。
+    pub retry_at: f64,
     pub snoozed: bool,
 }
 
@@ -542,6 +556,8 @@ mod tests {
         list.ring_file = r"D:\铃声\a|b.mp3".into();
         list.snooze_min = 9;
         list.loop_ring = false;
+        list.ring_len = 45;
+        list.retry_min = 7;
         let mut alarm = Alarm::new(6, 5, REPEAT_WEEKEND, "", "起床 | 别赖床");
         alarm.enabled = false;
         alarm.ring = r"C:\x\y.wav".into();
@@ -551,10 +567,27 @@ mod tests {
         assert_eq!(back.ring_file, r"D:\铃声\a|b.mp3");
         assert_eq!(back.snooze_min, 9);
         assert!(!back.loop_ring);
+        assert_eq!(back.ring_len, 45);
+        assert_eq!(back.retry_min, 7);
         assert_eq!(back.items.len(), 1);
         assert_eq!(back.items[0].label, "起床 | 别赖床");
         assert_eq!(back.items[0].repeat_text(), "周末");
         assert!(!back.items[0].enabled);
+    }
+
+    #[test]
+    fn ring_length_defaults_to_until_stopped_and_retries_after_five_minutes() {
+        // 用户要的默认：一直响到点停止，没停就 5 分钟后再响。
+        let fresh = AlarmList::fresh();
+        assert_eq!(fresh.ring_len, 0);
+        assert_eq!(fresh.retry_min, 5);
+        let parsed = AlarmList::parse("@ringlen|30\n@retry|0\n");
+        assert_eq!(parsed.ring_len, 30);
+        assert_eq!(parsed.retry_min, 0);
+        // 越界值收敛到上限，不 panic。
+        let clamped = AlarmList::parse("@ringlen|99999\n@retry|99999\n");
+        assert_eq!(clamped.ring_len, RING_LEN_MAX);
+        assert_eq!(clamped.retry_min, RETRY_MAX);
     }
 
     #[test]

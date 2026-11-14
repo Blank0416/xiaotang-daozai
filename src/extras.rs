@@ -1099,12 +1099,19 @@ impl App {
         });
         settings_label(ui, "响铃");
         settings_card(ui, |ui| {
-            let mut loop_ring = self.alarms.loop_ring;
-            setting_row(ui, "一直响到手停", "关掉的话，响铃 30 秒后自动安静", &mut loop_ring);
-            if loop_ring != self.alarms.loop_ring {
-                self.alarms.loop_ring = loop_ring;
+            let mut len = self.alarms.ring_len as i32;
+            if setting_number(ui, "响铃时长", &mut len, 0i32, crate::alarm::RING_LEN_MAX as i32, " 秒", 30.0) {
+                self.alarms.ring_len = len.clamp(0, crate::alarm::RING_LEN_MAX as i32) as u32;
                 self.alarms.save();
             }
+            settings_hint(ui, "0 = 一直响到点「停止」；设了秒数就响这么久后自动安静，弹层不会自己关。");
+            ui.separator();
+            let mut retry = self.alarms.retry_min as i32;
+            if setting_number(ui, "再响间隔", &mut retry, 0i32, crate::alarm::RETRY_MAX as i32, " 分钟", 1.0) {
+                self.alarms.retry_min = retry.clamp(0, crate::alarm::RETRY_MAX as i32) as u32;
+                self.alarms.save();
+            }
+            settings_hint(ui, "响完一轮还没点停止，就隔这么久再响一次；0 = 不再响。");
         });
         settings_hint(ui, "到点时岛仔会自己展开并停在闹钟页；点「贪睡」稍后再响，点「停止」结束。");
     }
