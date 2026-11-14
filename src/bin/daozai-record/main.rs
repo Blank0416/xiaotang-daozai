@@ -285,6 +285,7 @@ fn cursor_shapes(at: Pos2, press: f32, dragging: Option<f32>) -> Vec<Shape> {
 fn main() {
     if std::env::args().any(|a|a=="--gallery"){gallery();return;}
     if std::env::args().any(|a|a=="--alarm-check"){alarm_check();return;}
+if std::env::args().any(|a|a=="--page"){page_check();return;}
     let out_path = std::env::args().nth(1).unwrap_or_else(|| "daozai-demo.mp4".into());
     let (root, drag_file) = setup_data();
 
@@ -568,6 +569,41 @@ fn alarm_check() {
         std::fs::write(format!("{dest}/alarm-{scene}.rgba"), &rgba).unwrap();
         eprintln!("scene {scene} 已导出");
     }
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// 单页自检：把演示数据下的某一页导出成原始 RGBA，便于和别的页面逐像素对照。
+/// 用法：`daozai-record --page <页面号> <输出目录> [--empty]`（`--empty` 清空待办与闹钟，看空状态）。
+fn page_check() {
+    let (root, _) = setup_data();
+    let data = root.join("data");
+    let page: usize = std::env::args().nth(2).and_then(|a| a.parse().ok()).unwrap_or(4);
+    let dest = std::env::args().nth(3).unwrap_or_else(|| "page-preview".into());
+    std::fs::create_dir_all(&dest).unwrap();
+    if std::env::args().any(|a| a == "--empty") {
+        std::fs::write(data.join("todo.txt"), "").unwrap();
+        std::fs::write(data.join("alarms.txt"), "").unwrap();
+    }
+    let ctx = egui::Context::default();
+    let mut app = App::new(&ctx, Options { fetch_lyrics: false, pet_idle: 45.0 });
+    let mut ras = raster::Raster::new(1280, 380);
+    let mut rgba = vec![];
+    for frame in 0..40 {
+        let t = frame as f64 / 60.0;
+        let env = Env { t, clock: "10:28:00".into(), today: "2026-10-28".into(), date: "10月28日 周三".into(), battery: Some(76), charging: true, cursor: None, idle_seconds: Some(0.0), ..Default::default() };
+        app.show_page(page);
+        let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(640.0, 190.0))), time: Some(t), viewports: std::iter::once((egui::ViewportId::ROOT, egui::ViewportInfo { native_pixels_per_point: Some(2.0), ..Default::default() })).collect(), ..Default::default() };
+        let output = ctx.run(raw, |ctx| { egui::CentralPanel::default().frame(egui::Frame::new().fill(Color32::from_rgb(23, 28, 45))).show(ctx, |ui| { let win = ui.max_rect(); app.frame(ui, win, &env); }); });
+        ras.update_textures(&output.textures_delta);
+        if frame == 39 {
+            ras.buf.fill([0.09, 0.11, 0.18, 1.0]);
+            ras.draw(&ctx.tessellate(output.shapes, output.pixels_per_point), output.pixels_per_point);
+            ras.to_rgba8(&mut rgba);
+        }
+        ras.free_textures(&output.textures_delta);
+    }
+    std::fs::write(format!("{dest}/page-{page}.rgba"), &rgba).unwrap();
+    eprintln!("page {page} 已导出 → {dest}/page-{page}.rgba");
     let _ = std::fs::remove_dir_all(root);
 }
 

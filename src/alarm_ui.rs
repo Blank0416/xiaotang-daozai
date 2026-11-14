@@ -59,7 +59,7 @@ impl App {
         c.fill(196.0, 31.0, 181.0, 93.0, 12.0, theme::CARD);
         let count = self.alarms.items.len();
         if count == 0 {
-            clock_icon(c, 286.5, 64.0, 30.0, Color32::from_gray(150));
+            paint::alarm_clock(c, 286.5, 64.0, 32.0, Color32::from_gray(150), Color32::from_rgb(52, 54, 58));
             c.text(286.5, 99.0, "点「加一个」设闹钟", size::SMALL, W::Regular, theme::GRAY, H::Center);
             return;
         }

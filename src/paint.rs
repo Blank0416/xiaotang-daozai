@@ -666,6 +666,18 @@ pub fn checklist(c: &Card, cx: f32, cy: f32, size: f32, ink: Color32, plate: Col
     }
 }
 
+/// 空状态小闹钟：底板 + 表盘 + 顶铃 + 两只脚，与外框尺寸同族的图标语言。
+pub fn alarm_clock(c: &Card, cx: f32, cy: f32, size: f32, ink: Color32, plate: Color32) {
+    c.fill(cx - size / 2.0, cy - size / 2.0, size, size, size * 0.26, plate);
+    let r = size * 0.27;
+    let fy = cy + size * 0.04;
+    c.ring(cx, fy, r, 1.6, ink);
+    c.path(&[(cx, fy - r * 0.62), (cx, fy), (cx + r * 0.52, fy + r * 0.3)], 1.6, ink);
+    c.seg((cx - r * 0.66, fy - r * 1.3), (cx + r * 0.66, fy - r * 1.3), 2.0, ink);
+    c.seg((cx - r * 0.74, fy + r * 0.74), (cx - r * 1.06, fy + r * 1.08), 1.6, ink);
+    c.seg((cx + r * 0.74, fy + r * 0.74), (cx + r * 1.06, fy + r * 1.08), 1.6, ink);
+}
+
 /// 下载托盘：向下箭头落进收纳盒。`drop` 为箭头下坠位移（拖入时轻微弹跳）。
 pub fn tray(c: &Card, cx: f32, cy: f32, size: f32, drop: f32, color: Color32, shade: Color32) {
     let u = size / 30.0;
