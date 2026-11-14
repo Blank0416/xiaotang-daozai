@@ -429,15 +429,15 @@ impl Draft {
         alarm
     }
 
-    /// 一次性闹钟：日期固定在给定日期。
-    pub fn one_shot(today: &str, hour: u8, minute: u8) -> Self {
+    /// 一次性闹钟：日期留空，保存时按「还没到就是今天，已经过了就明天」自动定。
+    pub fn one_shot(hour: u8, minute: u8) -> Self {
         Self {
             index: None,
             label: String::new(),
             hour,
             minute,
             repeat: 0,
-            date: today.to_string(),
+            date: String::new(),
             snooze_min: 5,
             ring: String::new(),
             enabled: true,
@@ -454,6 +454,19 @@ pub fn one_shot_date(today: &str, clock: &str, hour: u8, minute: u8) -> String {
         return today.to_string();
     }
     parse_date(today).map(|d| (d + Days::new(1)).format("%Y-%m-%d").to_string()).unwrap_or_else(|| today.to_string())
+}
+
+/// 一次性闹钟最终落哪天：已设置且还没到的原样保留，空或已经过去的顺延到下一次。
+pub fn normalize_one_shot(date: &str, hour: u8, minute: u8, today: &str, clock: &str) -> String {
+    let Some(today_date) = parse_date(today) else { return date.to_string() };
+    let now = hhmm_to_min(clock).unwrap_or(0);
+    let target = hour as u32 * 60 + minute as u32;
+    if let Some(set) = parse_date(date) {
+        if set > today_date || (set == today_date && target > now) {
+            return date.to_string();
+        }
+    }
+    one_shot_date(today, clock, hour, minute)
 }
 
 /// 「N 分钟后再提醒」的目标时间；跨天时日期自动顺延。
@@ -558,5 +571,15 @@ mod tests {
     fn countdown_rolls_over_midnight() {
         let (date, hour, minute) = countdown_target("2026-11-14", "23:40:00", 30).unwrap();
         assert_eq!((date.as_str(), hour, minute), ("2026-11-15", 0, 10));
+    }
+
+    #[test]
+    fn one_shot_rolls_forward_when_its_time_already_passed() {
+        // 23:47 建一个「今天 11:30」的一次性闹钟：已经过点，必须顺延到明天，不能存成死条目。
+        assert_eq!(normalize_one_shot("", 11, 30, "2026-11-14", "23:47:00"), "2026-11-15");
+        assert_eq!(normalize_one_shot("2026-11-14", 11, 30, "2026-11-14", "23:47:00"), "2026-11-15");
+        // 还没到点的保留用户选的那天；将来某天的原样不动。
+        assert_eq!(normalize_one_shot("2026-11-14", 23, 50, "2026-11-14", "23:47:00"), "2026-11-14");
+        assert_eq!(normalize_one_shot("2026-12-01", 11, 30, "2026-11-14", "23:47:00"), "2026-12-01");
     }
 }

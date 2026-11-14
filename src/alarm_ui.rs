@@ -36,18 +36,28 @@ impl App {
     /// 闹钟页：左边下一个闹钟，右边开关列表。
     pub(crate) fn page_alarm(&mut self, c: &Card, env: &Env) {
         let now_hm = env.clock.get(..5).unwrap_or("").to_string();
-        let next = self
-            .alarms
-            .items
-            .iter()
-            .filter(|alarm| alarm.enabled)
-            .filter_map(|alarm| alarm.minutes_until(&env.today, &now_hm).map(|left| (left, Alarm::clone(alarm))))
-            .filter(|(left, _)| *left >= 0)
-            .min_by_key(|(left, _)| *left)
-            .map(|(_, alarm)| alarm);
+        // 下一个还没到的闹钟；再记一个「最近刚过掉的」，过期条目不能谎报成没有闹钟。
+        let mut next: Option<(i64, Alarm)> = None;
+        let mut stale: Option<(i64, usize, Alarm)> = None;
+        for (index, alarm) in self.alarms.items.iter().enumerate().filter(|(_, alarm)| alarm.enabled) {
+            match alarm.minutes_until(&env.today, &now_hm) {
+                Some(left) if left >= 0 => {
+                    if next.as_ref().map_or(true, |(best, _)| left < *best) {
+                        next = Some((left, Alarm::clone(alarm)));
+                    }
+                }
+                Some(left) => {
+                    if stale.as_ref().map_or(true, |(best, _, _)| left > *best) {
+                        stale = Some((left, index, Alarm::clone(alarm)));
+                    }
+                }
+                None => {}
+            }
+        }
+        let next = next.map(|(_, alarm)| alarm);
         // 与待办页同一套骨架：大数字基线 61，副标题 78，胶囊 96 起。
-        match &next {
-            Some(alarm) => {
+        match (&next, &stale) {
+            (Some(alarm), _) => {
                 let w = c.text(42.0, 61.0, &alarm.time_text(), size::HERO, W::Bold, theme::WHITE, H::Left);
                 c.text(42.0 + w + 5.0, 60.0, &alarm.repeat_text(), size::TINY, W::Semibold, theme::YELLOW, H::Left);
                 let left = alarm.minutes_until(&env.today, &now_hm).unwrap_or(0).max(0);
@@ -55,7 +65,18 @@ impl App {
                 let sub = if left < 24 * 60 { format!("{} · {}", when, human_left(left)) } else { when };
                 c.text(42.0, 78.0, &c.fit(&sub, size::SMALL, W::Regular, 146.0), size::SMALL, W::Regular, theme::GRAY, H::Left);
             }
-            None => {
+            (None, Some((_, index, alarm))) => {
+                // 有闹钟、还开着，但那个时刻已经过去了：如实说出来，并让点一下能改。
+                let hit = c.hit(41.0, 40.0, 150.0, 44.0, "alarm-stale").on_hover_text("这条已经过了，点一下改时间");
+                let color = if hit.hovered() { theme::GRAY } else { theme::DIM };
+                c.text(42.0, 61.0, &alarm.time_text(), size::HERO, W::Bold, color, H::Left);
+                let sub = format!("{} · 点一下改时间", alarm.next_text(&env.today, &now_hm));
+                c.text(42.0, 78.0, &c.fit(&sub, size::SMALL, W::Regular, 146.0), size::SMALL, W::Regular, theme::DIM, H::Left);
+                if hit.clicked() {
+                    self.open_alarm_draft(Draft::from_alarm(*index, alarm));
+                }
+            }
+            (None, None) => {
                 c.text(42.0, 61.0, "--:--", size::HERO, W::Bold, theme::DIM, H::Left);
                 c.text(42.0, 78.0, "还没有闹钟", size::SMALL, W::Regular, theme::GRAY, H::Left);
             }
@@ -65,7 +86,7 @@ impl App {
         ac.text(67.0, 112.5, "加一个", size::BODY, W::Regular, theme::WHITE, H::Left);
         if add.clicked() {
             let (hour, minute) = next.as_ref().map(|alarm| (alarm.hour, alarm.minute)).unwrap_or((7, 30));
-            self.open_alarm_draft(Draft::one_shot(&env.today, hour, minute));
+            self.open_alarm_draft(Draft::one_shot(hour, minute));
         }
         // 倒计时：最常见的时长，点一下就到点提醒。
         let (cd, cdc) = capsule(c, 121.0, 96.0, 68.0, 26.0, "alarm-countdown", theme::BTN, theme::BTN_HOVER);
@@ -97,6 +118,7 @@ impl App {
             }
             let y = 46.0 + row as f32 * 22.0;
             let alarm = Alarm::clone(&self.alarms.items[index]);
+            let expired = matches!(alarm.minutes_until(&env.today, &now_hm), Some(left) if left < 0);
             let rc = if alarm.enabled { c.clone() } else { c.faded(0.45) };
             if island_switch(c, 201.0, y - 10.0, alarm.enabled, &format!("alarm-switch-{index}")) {
                 toggled = Some(index);
@@ -108,13 +130,20 @@ impl App {
             }
             rc.text(243.0, y + 4.0, &alarm.time_text(), 11.5, W::Semibold, if alarm.enabled { theme::WHITE } else { theme::GRAY }, H::Left);
             let tag = alarm.repeat_text();
-            let label = if alarm.label.trim().is_empty() { tag.clone() } else { alarm.label.clone() };
-            let label = c.fit(&label, size::TINY, W::Regular, 56.0);
-            rc.text(292.0, y + 3.6, &label, size::TINY, W::Regular, theme::GRAY, H::Left);
-            r.clone().on_hover_text(if alarm.label.trim().is_empty() {
-                format!("{} · {} · 点击修改", alarm.time_text(), tag)
+            let label = if expired {
+                "已过期".to_string()
+            } else if alarm.label.trim().is_empty() {
+                tag.clone()
             } else {
-                format!("{} · {} · {}", alarm.label, alarm.time_text(), tag)
+                alarm.label.clone()
+            };
+            let label = c.fit(&label, size::TINY, W::Regular, 56.0);
+            rc.text(292.0, y + 3.6, &label, size::TINY, W::Regular, if expired { theme::YELLOW } else { theme::GRAY }, H::Left);
+            let suffix = if expired { " · 已过期，点一下改时间" } else { " · 点击修改" };
+            r.clone().on_hover_text(if alarm.label.trim().is_empty() {
+                format!("{} · {}{suffix}", alarm.time_text(), tag)
+            } else {
+                format!("{} · {} · {}{suffix}", alarm.label, alarm.time_text(), tag)
             });
             if r.clicked() {
                 edit = Some(index);
@@ -161,7 +190,7 @@ impl App {
 
     /// 自检与演示用：不依赖鼠标事件直接打开新建闹钟弹层。
     pub fn demo_alarm_editor(&mut self, env: &Env) {
-        self.open_alarm_draft(Draft::one_shot(&env.today, 7, 30));
+        self.open_alarm_draft(Draft::one_shot(7, 30));
     }
 
     /// 自检与演示用：直接打开倒计时弹层。
@@ -318,11 +347,7 @@ impl App {
     fn save_alarm_draft(&mut self, env: &Env) {
         let Some(draft) = self.alarm_edit.take() else { return };
         let date = if draft.repeat == 0 {
-            if draft.date.is_empty() {
-                crate::alarm::one_shot_date(&env.today, &env.clock, draft.hour, draft.minute)
-            } else {
-                draft.date.clone()
-            }
+            crate::alarm::normalize_one_shot(&draft.date, draft.hour, draft.minute, &env.today, &env.clock)
         } else {
             String::new()
         };
