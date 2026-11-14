@@ -136,6 +136,23 @@ impl App {
         }
     }
 
+    /// 自检与演示用：不依赖鼠标事件直接打开新建闹钟弹层。
+    pub fn demo_alarm_editor(&mut self, env: &Env) {
+        self.open_alarm_draft(Draft::one_shot(&env.today, 7, 30));
+    }
+
+    /// 自检与演示用：直接摆出响铃界面。
+    pub fn demo_alarm_ring(&mut self) {
+        let (label, time) = self
+            .alarms
+            .items
+            .first()
+            .map(|alarm| (alarm.label.clone(), alarm.time_text()))
+            .unwrap_or_else(|| ("起床".to_string(), "07:30".to_string()));
+        self.alarm_ring = Some(Ringing { index: 0, label, time, since: 0.0, snoozed: false });
+        self.open = true;
+    }
+
     fn open_alarm_draft(&mut self, mut draft: Draft) {
         if draft.snooze_min == 0 {
             draft.snooze_min = self.alarms.snooze_min.max(SNOOZE_MIN);

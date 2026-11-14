@@ -284,6 +284,7 @@ fn cursor_shapes(at: Pos2, press: f32, dragging: Option<f32>) -> Vec<Shape> {
 
 fn main() {
     if std::env::args().any(|a|a=="--gallery"){gallery();return;}
+    if std::env::args().any(|a|a=="--alarm-check"){alarm_check();return;}
     let out_path = std::env::args().nth(1).unwrap_or_else(|| "daozai-demo.mp4".into());
     let (root, drag_file) = setup_data();
 
@@ -528,6 +529,46 @@ fn main() {
     let _ = ff.wait();
     let _ = std::fs::remove_dir_all(root);
     eprintln!("{frame_no} 帧 → {out_path}");
+}
+
+/// 闹钟页自检：空状态、三条闹钟、编辑弹层、响铃四帧，导出原始 RGBA 供人工核对版式。
+fn alarm_check() {
+    let (root, _) = setup_data();
+    let data = root.join("data");
+    let dest = std::env::args().nth(2).unwrap_or_else(|| "alarm-preview".into());
+    std::fs::create_dir_all(&dest).unwrap();
+    let three = "a|1|07:30|127||5||||起床\na|1|09:00|31||5||||周会提醒\na|0|22:15|0|2026-11-15|5||||睡前一刻\n";
+    let due = "a|1|10:28|127||5||||该起来了\n";
+    for (scene, body) in [(0usize, ""), (1usize, three), (2usize, three), (3usize, due)] {
+        std::fs::write(data.join("alarms.txt"), body).unwrap();
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx, Options { fetch_lyrics: false, pet_idle: 45.0 });
+        let mut ras = raster::Raster::new(1280, 380);
+        let mut rgba = vec![];
+        for frame in 0..40 {
+            let t = frame as f64 / 60.0;
+            let env = Env { t, clock: "10:28:00".into(), today: "2026-10-28".into(), date: "10月28日 周三".into(), battery: Some(76), charging: true, cursor: None, idle_seconds: Some(0.0), ..Default::default() };
+            app.show_page(9);
+            if scene == 2 { app.demo_alarm_editor(&env); }
+            if scene == 3 { app.demo_alarm_ring(); }
+            if frame == 39 {
+                eprintln!("scene {scene} page={} alarms={:?}", app.page(), std::fs::read_to_string(daozai::model::config_dir().join("alarms.txt")).map(|t| t.len()));
+            }
+            let events: Vec<Event> = vec![];
+            let raw = egui::RawInput { events, screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(640.0, 190.0))), time: Some(t), viewports: std::iter::once((egui::ViewportId::ROOT, egui::ViewportInfo { native_pixels_per_point: Some(2.0), ..Default::default() })).collect(), ..Default::default() };
+            let output = ctx.run(raw, |ctx| { egui::CentralPanel::default().frame(egui::Frame::new().fill(Color32::from_rgb(23, 28, 45))).show(ctx, |ui| { let win = ui.max_rect(); app.frame(ui, win, &env); }); });
+            ras.update_textures(&output.textures_delta);
+            if frame == 39 {
+                ras.buf.fill([0.09, 0.11, 0.18, 1.0]);
+                ras.draw(&ctx.tessellate(output.shapes, output.pixels_per_point), output.pixels_per_point);
+                ras.to_rgba8(&mut rgba);
+            }
+            ras.free_textures(&output.textures_delta);
+        }
+        std::fs::write(format!("{dest}/alarm-{scene}.rgba"), &rgba).unwrap();
+        eprintln!("scene {scene} 已导出");
+    }
+    let _ = std::fs::remove_dir_all(root);
 }
 
 /// 将实际渲染的六个页面、休息状态与提醒导出，供回归检查。
