@@ -157,6 +157,10 @@ impl App {
         if draft.snooze_min == 0 {
             draft.snooze_min = self.alarms.snooze_min.max(SNOOZE_MIN);
         }
+        self.alarm_pos = [draft.hour as i64, draft.minute as i64];
+        self.alarm_wheel = [0.0; 2];
+        self.alarm_drag = [0.0; 2];
+        self.alarm_focus = true;
         self.alarm_edit = Some(draft);
         self.subpage = None;
     }
@@ -171,87 +175,152 @@ impl App {
         self.alarms.scroll = self.alarms.items.len().saturating_sub(1);
     }
 
-    /// 编辑弹层：时间、重复、贪睡、标题。
+    /// 编辑弹层：左边标题与重复（标题可空），右边时间滚轮。
     pub(crate) fn draw_alarm_editor(&mut self, c: &Card, env: &Env) {
         let Some(draft) = self.alarm_edit.clone() else { return };
         let editing = draft.index.is_some();
         let w = c.text(15.0, 25.0, "闹钟", size::TITLE, W::Bold, theme::WHITE, H::Left);
         c.text(15.0 + w + 2.0, 25.0, if editing { "编辑" } else { "新建" }, size::TITLE, W::Bold, theme::YELLOW, H::Left);
 
-        // 时间行：时 / 分分开加减，贪睡放右边。
-        let y = 40.0;
-        c.text(43.0, y + 13.0, "时间", 10.5, W::Regular, theme::GRAY, H::Left);
-        let dh = stepper(c, 178.0, y, &format!("{:02}", draft.hour), "alarm-hour");
-        if dh != 0 {
-            if let Some(d) = self.alarm_edit.as_mut() {
-                d.hour = ((d.hour as i32 + dh).rem_euclid(24)) as u8;
-            }
-        }
-        c.text(181.0, y + 13.0, ":", 11.0, W::Semibold, theme::WHITE, H::Left);
-        let dm = stepper(c, 292.0, y, &format!("{:02}", draft.minute), "alarm-minute");
-        if dm != 0 {
-            if let Some(d) = self.alarm_edit.as_mut() {
-                d.minute = ((d.minute as i32 + dm).rem_euclid(60)) as u8;
-            }
-        }
-        let dsn = stepper(c, 370.0, y, &format!("{} 分", draft.snooze_min), "alarm-snooze");
-        if dsn != 0 {
-            if let Some(d) = self.alarm_edit.as_mut() {
-                d.snooze_min = (d.snooze_min as i32 + dsn).clamp(SNOOZE_MIN as i32, SNOOZE_MAX as i32) as u32;
-            }
-        }
+        // 左栏：标题（可空）+ 重复；时间在右卡片上用滚轮挑。
+        c.fill(41.0, 36.0, 145.0, 20.0, 7.0, Color32::from_rgb(34, 34, 38));
 
         // 星期：全不选 = 一次性。
-        let y = 64.0;
-        c.text(43.0, y + 13.0, "重复", 10.5, W::Regular, theme::GRAY, H::Left);
+        c.text(41.0, 76.0, "重复", 10.5, W::Regular, theme::GRAY, H::Left);
         for day in 0..7usize {
             let on = draft.repeat & (1 << day) != 0;
-            let x = 91.0 + day as f32 * 26.0;
-            let (r, b) = capsule(c, x, y, 23.0, 19.0, &format!("alarm-day-{day}"), if on { Color32::from_rgb(39, 94, 150) } else { theme::BTN }, theme::BTN_HOVER);
-            b.centered_text(x + 11.5, y + 9.5, crate::alarm::WEEK_NAMES[day], 9.5, W::Semibold, if on { theme::WHITE } else { theme::GRAY }, H::Center);
+            let x = 66.0 + day as f32 * 18.0;
+            let (r, b) = capsule(c, x, 62.0, 16.0, 19.0, &format!("alarm-day-{day}"), if on { Color32::from_rgb(39, 94, 150) } else { theme::BTN }, theme::BTN_HOVER);
+            b.centered_text(x + 8.0, 71.5, crate::alarm::WEEK_NAMES[day], 9.0, W::Semibold, if on { theme::WHITE } else { theme::GRAY }, H::Center);
             if r.on_hover_text(format!("每周{}", crate::alarm::WEEK_NAMES[day])).clicked() {
                 if let Some(d) = self.alarm_edit.as_mut() {
                     d.repeat ^= 1 << day;
                 }
             }
         }
-        if setting_button(c, 280.0, y, 42.0, "每天", draft.repeat == crate::alarm::REPEAT_ALL, "alarm-every-day") {
+        if setting_button(c, 41.0, 90.0, 62.0, "每天", draft.repeat == crate::alarm::REPEAT_ALL, "alarm-every-day") {
             let repeat = if draft.repeat == crate::alarm::REPEAT_ALL { 0 } else { crate::alarm::REPEAT_ALL };
             if let Some(d) = self.alarm_edit.as_mut() {
                 d.repeat = repeat;
             }
         }
-        if setting_button(c, 326.0, y, 44.0, "工作日", draft.repeat == crate::alarm::REPEAT_WORKDAYS, "alarm-workdays") {
+        if setting_button(c, 107.0, 90.0, 74.0, "工作日", draft.repeat == crate::alarm::REPEAT_WORKDAYS, "alarm-workdays") {
             let repeat = if draft.repeat == crate::alarm::REPEAT_WORKDAYS { 0 } else { crate::alarm::REPEAT_WORKDAYS };
             if let Some(d) = self.alarm_edit.as_mut() {
                 d.repeat = repeat;
             }
         }
 
-        // 标题
-        let y = 88.0;
-        c.text(43.0, y + 13.0, "标题", 10.5, W::Regular, theme::GRAY, H::Left);
-        c.fill(91.0, y - 2.0, 279.0, 20.0, 7.0, Color32::from_rgb(34, 34, 38));
-        // 文字由下面放置的 TextEdit 自己画（含 hint），这里只留底色，避免两层字叠在一起。
+        // 右卡片：时间滚轮 —— 和待办提醒同一套交互（滚轮 / 拖动 / 点选），带滚动动画。
+        let ctx = c.ui.ctx();
+        let mut pos = self.alarm_pos;
+        for (column, (x, width)) in [(206.0, 78.0), (290.0, 78.0)].into_iter().enumerate() {
+            let response = c.hit_drag(x, 52.0, width, 52.0, ("alarm-wheel", column));
+            if response.hovered() {
+                let (delta, now) = ctx.input(|i| {
+                    let delta = i
+                        .events
+                        .iter()
+                        .filter_map(|event| match event {
+                            egui::Event::MouseWheel { unit, delta, modifiers } if !modifiers.ctrl && !modifiers.command => {
+                                Some(-delta.y * if *unit == egui::MouseWheelUnit::Point { 1.0 } else { 40.0 })
+                            }
+                            _ => None,
+                        })
+                        .sum::<f32>();
+                    (delta, i.time)
+                });
+                if delta != 0.0 {
+                    if now - self.alarm_wheel_at[column] > 0.25 || self.alarm_wheel[column] * delta < 0.0 {
+                        self.alarm_wheel[column] = 0.0;
+                    }
+                    self.alarm_wheel_at[column] = now;
+                    self.alarm_wheel[column] += delta;
+                    let steps = (self.alarm_wheel[column] / 40.0).trunc() as i64;
+                    self.alarm_wheel[column] -= steps as f32 * 40.0;
+                    pos[column] += steps;
+                    ctx.input_mut(|i| {
+                        i.raw_scroll_delta = egui::Vec2::ZERO;
+                        i.smooth_scroll_delta = egui::Vec2::ZERO;
+                    });
+                }
+            }
+            if response.drag_started() {
+                self.alarm_drag[column] = 0.0;
+            }
+            if response.dragged() {
+                self.alarm_drag[column] -= response.drag_delta().y / c.s;
+                let steps = (self.alarm_drag[column] / 20.0).trunc() as i64;
+                self.alarm_drag[column] -= steps as f32 * 20.0;
+                pos[column] += steps;
+            }
+            if response.clicked() {
+                if let Some(p) = response.interact_pointer_pos() {
+                    let y = c.to_local(p).y;
+                    if y < 67.0 {
+                        pos[column] -= 1;
+                    } else if y > 85.0 {
+                        pos[column] += 1;
+                    }
+                }
+            }
+            response.on_hover_text(if column == 0 { "小时 · 滚轮、上下拖动或点选调整" } else { "分钟 · 滚轮、上下拖动或点选调整" });
+        }
+        self.alarm_pos = pos;
+        let hour = pos[0].rem_euclid(24) as u8;
+        let minute = pos[1].rem_euclid(60) as u8;
+        if let Some(d) = self.alarm_edit.as_mut() {
+            d.hour = hour;
+            d.minute = minute;
+        }
+        c.fill(196.0, 31.0, 181.0, 93.0, 12.0, theme::CARD);
+        c.text(204.0, 45.0, "时间", 9.5, W::Regular, theme::GRAY, H::Left);
+        if draft.repeat == 0 {
+            let now_hm = env.clock.get(..5).unwrap_or("");
+            let label = if format!("{hour:02}:{minute:02}").as_str() > now_hm { "今天" } else { "明天" };
+            c.text(369.0, 45.0, label, 9.5, W::Regular, theme::DIM, H::Right);
+        }
+        c.fill(202.0, 65.0, 169.0, 22.0, 7.0, Color32::from_rgb(42, 42, 46));
+        for y in [72.0, 80.0] {
+            c.circle(287.0, y, 0.9, theme::WHITE);
+        }
+        for (column, (x, width)) in [(206.0, 78.0), (290.0, 78.0)].into_iter().enumerate() {
+            let value = ctx.animate_value_with_time(egui::Id::new(("alarm-wheel-value", column)), pos[column] as f32, if self.alarm_focus { 0.0 } else { 0.13 });
+            let clipped = c.clipped(x, 52.0, width, 45.0);
+            for step in value.floor() as i64 - 1..=value.floor() as i64 + 2 {
+                let distance = step as f32 - value;
+                let strength = (1.0 - distance.abs() * 0.55).clamp(0.0, 1.0);
+                let size = 10.0 + (17.0 - 10.0) * strength;
+                let color = Color32::from_gray((80.0 + 175.0 * strength) as u8);
+                let text = if column == 0 { format!("{:02}", step.rem_euclid(24)) } else { format!("{:02}", step.rem_euclid(60)) };
+                clipped.centered_text(x + width / 2.0, 76.0 + distance * 18.0, &text, size, if strength > 0.7 { W::Semibold } else { W::Regular }, color, H::Center);
+            }
+        }
+        self.alarm_focus = false;
+        if c.hit(228.0, 100.0, 64.0, 20.0, "alarm-cancel").clicked() {
+            self.alarm_edit = None;
+        }
+        c.centered_text(260.0, 110.0, "取消", 10.0, W::Regular, theme::GRAY, H::Center);
+        let (save, b) = capsule(c, 302.0, 100.0, 66.0, 20.0, "alarm-save", Color32::from_rgb(10, 132, 255), Color32::from_rgb(35, 150, 255));
+        b.centered_text(335.0, 110.0, "完成", 10.0, W::Semibold, theme::WHITE, H::Center);
+        if save.clicked() {
+            self.save_alarm_draft(env);
+        }
 
-        let y = 108.0;
-        if setting_button(c, 41.0, y, 64.0, "试听", false, "alarm-preview") {
+        // 右上角：试听 / 删除。
+        if c.hit(296.0, 14.0, 44.0, 18.0, "alarm-preview").clicked() {
             let path = self.alarms.default_ring().to_string();
             self.alarm_player.start(&path, self.alarms.volume, false);
         }
+        c.centered_text(318.0, 26.0, "试听", 10.0, W::Regular, theme::GRAY, H::Center);
         if let Some(index) = draft.index {
-            if setting_button(c, 111.0, y, 64.0, "删除", false, "alarm-editor-delete") {
+            if c.hit(344.0, 14.0, 44.0, 18.0, "alarm-editor-delete").clicked() {
                 self.alarms.remove(index);
                 self.alarm_edit = None;
                 self.say("闹钟已删除");
                 return;
             }
-        }
-        if setting_button(c, 222.0, y, 72.0, "取消", false, "alarm-cancel") {
-            self.alarm_edit = None;
-        }
-        if setting_button(c, 300.0, y, 70.0, "保存", true, "alarm-save") {
-            self.save_alarm_draft(env);
+            c.centered_text(366.0, 26.0, "删除", 10.0, W::Regular, theme::GRAY, H::Center);
         }
     }
 
@@ -260,10 +329,10 @@ impl App {
         {
             let Some(draft) = self.alarm_edit.as_mut() else { return };
             let input = ui.put(
-                Rect::from_min_size(origin + egui::vec2(97.0, 88.0), egui::vec2(268.0, 18.0)),
+                Rect::from_min_size(origin + egui::vec2(47.0, 39.0), egui::vec2(133.0, 15.0)),
                 egui::TextEdit::singleline(&mut draft.label)
                     .vertical_align(egui::Align::Center)
-                    .hint_text("起床 / 开会 / 吃药")
+                    .hint_text("闹钟名（可空）")
                     .id(egui::Id::new("alarm-label-edit"))
                     .frame(false)
                     .margin(egui::Margin::ZERO)
