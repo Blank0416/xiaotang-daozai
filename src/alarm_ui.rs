@@ -28,18 +28,17 @@ impl App {
             .filter(|(left, _)| *left >= 0)
             .min_by_key(|(left, _)| *left)
             .map(|(_, alarm)| alarm);
+        // 与待办页同一套骨架：大数字基线 61，副标题 78，胶囊 96 起。
         match &next {
             Some(alarm) => {
-                c.text(42.0, 61.0, "下一个", size::SMALL, W::Regular, theme::GRAY, H::Left);
-                let w = c.text(42.0, 88.0, &alarm.time_text(), size::HERO * 1.2, W::Bold, theme::WHITE, H::Left);
-                c.text(42.0 + w + 4.0, 88.0, &alarm.repeat_text(), size::TINY, W::Regular, theme::YELLOW, H::Left);
+                let w = c.text(42.0, 61.0, &alarm.time_text(), size::HERO, W::Bold, theme::WHITE, H::Left);
+                c.text(42.0 + w + 5.0, 60.0, &alarm.repeat_text(), size::TINY, W::Semibold, theme::YELLOW, H::Left);
                 let when = alarm.next_text(&env.today, &now_hm);
-                c.text(42.0, 103.0, &c.fit(&when, size::TINY, W::Regular, 140.0), size::TINY, W::Regular, theme::DIM, H::Left);
+                c.text(42.0, 78.0, &c.fit(&when, size::SMALL, W::Regular, 146.0), size::SMALL, W::Regular, theme::GRAY, H::Left);
             }
             None => {
-                c.text(42.0, 61.0, "闹钟", size::SMALL, W::Regular, theme::GRAY, H::Left);
-                c.text(42.0, 88.0, "--:--", size::HERO * 1.2, W::Bold, theme::DIM, H::Left);
-                c.text(42.0, 103.0, "还没有开着的闹钟", size::TINY, W::Regular, theme::DIM, H::Left);
+                c.text(42.0, 61.0, "--:--", size::HERO, W::Bold, theme::DIM, H::Left);
+                c.text(42.0, 78.0, "还没有闹钟", size::SMALL, W::Regular, theme::GRAY, H::Left);
             }
         }
         let (add, ac) = capsule(c, 41.0, 96.0, 74.0, 26.0, "alarm-add", theme::BTN, theme::BTN_HOVER);
@@ -60,7 +59,7 @@ impl App {
         c.fill(196.0, 31.0, 181.0, 93.0, 12.0, theme::CARD);
         let count = self.alarms.items.len();
         if count == 0 {
-            clock_icon(c, 286.5, 62.0, 26.0, Color32::from_gray(150));
+            clock_icon(c, 286.5, 64.0, 30.0, Color32::from_gray(150));
             c.text(286.5, 99.0, "点「加一个」设闹钟", size::SMALL, W::Regular, theme::GRAY, H::Center);
             return;
         }
@@ -216,9 +215,7 @@ impl App {
         let y = 88.0;
         c.text(43.0, y + 13.0, "标题", 10.5, W::Regular, theme::GRAY, H::Left);
         c.fill(91.0, y - 2.0, 279.0, 20.0, 7.0, Color32::from_rgb(34, 34, 38));
-        let placeholder = if draft.repeat == 0 { "只响一次" } else { "到点提醒" };
-        let shown = if draft.label.trim().is_empty() { placeholder.to_string() } else { draft.label.clone() };
-        c.text(97.0, y + 12.0, &c.fit(&shown, 11.5, W::Regular, 258.0), 11.5, W::Regular, if draft.label.trim().is_empty() { theme::DIM } else { theme::WHITE }, H::Left);
+        // 文字由下面放置的 TextEdit 自己画（含 hint），这里只留底色，避免两层字叠在一起。
 
         let y = 108.0;
         if setting_button(c, 41.0, y, 64.0, "试听", false, "alarm-preview") {
@@ -241,21 +238,30 @@ impl App {
         }
     }
 
-    pub(crate) fn alarm_editor_inputs(&mut self, ui: &mut egui::Ui, origin: Pos2, cmds: &mut Vec<Cmd>) {
-        let Some(draft) = self.alarm_edit.as_mut() else { return };
-        let input = ui.put(
-            Rect::from_min_size(origin + egui::vec2(97.0, 88.0), egui::vec2(268.0, 18.0)),
-            egui::TextEdit::singleline(&mut draft.label)
-                .vertical_align(egui::Align::Center)
-                .hint_text("起床 / 开会 / 吃药")
-                .id(egui::Id::new("alarm-label-edit"))
-                .frame(false)
-                .font(theme::font(11.5, W::Regular)),
-        );
-        if !draft.focused {
-            input.request_focus();
-            draft.focused = true;
-            cmds.push(Cmd::Focus);
+    pub(crate) fn alarm_editor_inputs(&mut self, ui: &mut egui::Ui, origin: Pos2, cmds: &mut Vec<Cmd>, env: &Env) {
+        let mut first = false;
+        {
+            let Some(draft) = self.alarm_edit.as_mut() else { return };
+            let input = ui.put(
+                Rect::from_min_size(origin + egui::vec2(97.0, 88.0), egui::vec2(268.0, 18.0)),
+                egui::TextEdit::singleline(&mut draft.label)
+                    .vertical_align(egui::Align::Center)
+                    .hint_text("起床 / 开会 / 吃药")
+                    .id(egui::Id::new("alarm-label-edit"))
+                    .frame(false)
+                    .margin(egui::Margin::ZERO)
+                    .text_color(theme::WHITE)
+                    .font(theme::font(11.5, W::Regular)),
+            );
+            if !draft.focused {
+                input.request_focus();
+                draft.focused = true;
+                first = true;
+                cmds.push(Cmd::Focus);
+            }
+        }
+        if !first && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            self.save_alarm_draft(env);
         }
     }
 

@@ -2009,7 +2009,7 @@ impl App {
         }
 
         if self.task_dialog.is_some() && reveal>0.9 {self.task_editor_inputs(ui,origin,&mut cmds);}
-        if self.alarm_edit.is_some() && reveal>0.9 && self.alarm_ring.is_none() {self.alarm_editor_inputs(ui,origin,&mut cmds);}
+        if self.alarm_edit.is_some() && reveal>0.9 && self.alarm_ring.is_none() {self.alarm_editor_inputs(ui,origin,&mut cmds,env);}
         if self.calendar.draft.is_some() && reveal>0.9 {self.calendar_editor_inputs(ui,origin,&mut cmds);}
 
         // ---------- 输出 ----------
