@@ -36,6 +36,8 @@ pub const TODO_PAGE: usize = 4;
 pub const MAIL_PAGE: usize = 5;
 pub const QUOTA_PAGE: usize = 6;
 pub const CALENDAR_PAGE: usize = 7;
+/// 闹钟页：最后一张，属于「提醒」分组。
+pub const ALARM_PAGE: usize = 9;
 pub const WEATHER_PAGE: usize = 8;
 pub(crate) const WEATHER_H: f32 = 232.0;
 pub(crate) const CALENDAR_H: f32 = 216.0;
@@ -64,8 +66,8 @@ fn pill_shadow(painter:&egui::Painter,rect:Rect,radius:f32,strength:f32){
         painter.rect_filled(r,radius+grow*0.8,Color32::from_black_alpha((255.0*a*strength) as u8));
     }
 }
-pub(crate) const PAGE_NAMES: [&str; 9] = ["音乐", "专注", "健康", "置物架", "待办", "邮箱", "AI 额度", "日程", "天气"];
-pub(crate) const PAGE_SETTINGS_TABS: [usize; 9] = [1,2,3,5,4,7,11,8,12];
+pub(crate) const PAGE_NAMES: [&str; 10] = ["音乐", "专注", "健康", "置物架", "待办", "邮箱", "AI 额度", "日程", "天气", "闹钟"];
+pub(crate) const PAGE_SETTINGS_TABS: [usize; 10] = [1,2,3,5,4,7,11,8,12,13];
 
 // ---------- 动效参数 ----------
 /// 悬停意图缓冲：光标停留这么久才真正展开（期间药丸轻微胀大作为反馈），防误触。
@@ -655,7 +657,7 @@ pub struct App {
     page_dir: f32,
     page_t0: f64,
     slide: Spring,
-    dots: [Spring; 9],
+    dots: [Spring; 10],
     wheel_delta: f32,
     wheel_at: f64,
     wheel_page_at: f64,
@@ -721,7 +723,7 @@ pub struct App {
     pub(crate) media: NowPlaying,
     pub(crate) music_artwork: Option<(std::sync::Arc<egui::ColorImage>,egui::TextureHandle)>,
 
-    forced_open_until:f64,
+    pub(crate) forced_open_until:f64,
     pub settings_open:bool,
     settings_window:std::sync::Arc<std::sync::Mutex<crate::settings_window::State>>,
     pub displays:Vec<crate::display_layout::Display>,
@@ -741,6 +743,12 @@ pub struct App {
     pub(crate) notification_apps:model::NotificationApps,
     pub(crate) subpage:Option<usize>,
     pub(crate) task_dialog:Option<crate::extras::TaskDraft>,
+    /// 闹钟：列表、编辑草稿、正在响的那个、当前时间。
+    pub(crate) alarms: crate::alarm::AlarmList,
+    pub(crate) alarm_edit: Option<crate::alarm::Draft>,
+    pub(crate) alarm_ring: Option<crate::alarm::Ringing>,
+    pub(crate) alarm_now: Option<chrono::NaiveDateTime>,
+    pub(crate) alarm_player: crate::alarm_audio::Player,
     pub listener_status: String,
     pub(crate) notification_bell_until: f64,
     pub(crate) notification_bell_at: f64,
@@ -887,7 +895,7 @@ impl App {
             media_anchor: (String::new(), 0.0, 0.0, false),
             media: NowPlaying::default(),
             music_artwork: None,
-            forced_open_until:0.0, settings_open:false, settings_window:std::sync::Arc::new(std::sync::Mutex::new(crate::settings_window::State::load())), displays:Vec::new(), browser_at_top:false, browser_minimal_active:false, glass_tint:0.0, fluid:Default::default(), fluid_origin:Pos2::ZERO, fluid_art:None, fluid_title:String::new(), screen:None, settings_focus_requested:false, settings_tab:0, settings_category:0, messenger_statuses:Default::default(), notification_apps:model::NotificationApps::load(), subpage:None, task_dialog:None,
+            forced_open_until:0.0, settings_open:false, settings_window:std::sync::Arc::new(std::sync::Mutex::new(crate::settings_window::State::load())), displays:Vec::new(), browser_at_top:false, browser_minimal_active:false, glass_tint:0.0, fluid:Default::default(), fluid_origin:Pos2::ZERO, fluid_art:None, fluid_title:String::new(), screen:None, settings_focus_requested:false, settings_tab:0, settings_category:0, messenger_statuses:Default::default(), notification_apps:model::NotificationApps::load(), subpage:None, task_dialog:None, alarms:crate::alarm::AlarmList::load(), alarm_edit:None, alarm_ring:None, alarm_now:None, alarm_player:crate::alarm_audio::Player::new(),
             listener_status: "尚未连接".into(),
             notification_bell_until: 0.0, notification_bell_at: -10.0, notice: None, hud_notice: None, hud_alpha: 0.0, notice_width:Spring::new(0.0,CLOSE.0,CLOSE.1), notice_details:false, pending_messengers:Vec::new(), messenger_scroll:0.0, alerts: Default::default(), history: Default::default(), pending: vec![],
             todo_first: 0, todo_choosing: false, pet: Default::default(), last_drink: None,
@@ -1984,7 +1992,7 @@ impl App {
         if reveal > 0.004 && !banner && !restoring_lyrics {
             let c = base.shifted(0.0, (1.0 - reveal) * -5.0).faded(reveal);
             let c = if reveal < 0.6 { c.ghost() } else { c };
-            if self.calendar.draft.is_some(){self.draw_calendar_editor(&c);}else if self.task_dialog.is_some(){self.draw_task_editor(&c);}else{self.panel_body(&c, env, &mut cmds);}
+            if self.alarm_ring.is_some(){self.draw_alarm_ring(&c, env);}else if self.alarm_edit.is_some(){self.draw_alarm_editor(&c, env);}else if self.calendar.draft.is_some(){self.draw_calendar_editor(&c);}else if self.task_dialog.is_some(){self.draw_task_editor(&c);}else{self.panel_body(&c, env, &mut cmds);}
             if !self.toast_below {self.toast_layer(&c,106.0);}
         }
         // 岛下的确认提示使用独立裁剪区域，收起时跟随岛体下沿。
@@ -2001,6 +2009,7 @@ impl App {
         }
 
         if self.task_dialog.is_some() && reveal>0.9 {self.task_editor_inputs(ui,origin,&mut cmds);}
+        if self.alarm_edit.is_some() && reveal>0.9 && self.alarm_ring.is_none() {self.alarm_editor_inputs(ui,origin,&mut cmds);}
         if self.calendar.draft.is_some() && reveal>0.9 {self.calendar_editor_inputs(ui,origin,&mut cmds);}
 
         // ---------- 输出 ----------
@@ -2798,6 +2807,7 @@ impl App {
             6 => ("AI", "额度", theme::SOFT_GREEN),
             8 if self.weather.solar_open => ("日出", "日落", theme::YELLOW),
             8 => ("当地", "天气", theme::CYAN),
+            ALARM_PAGE => ("闹钟", "提醒", theme::YELLOW),
             _ => ("岛仔", "设置", theme::WHITE),
         };
         let wa = c.text(15.0, base, a, size::TITLE, W::Bold, theme::WHITE, H::Left);
@@ -2856,6 +2866,7 @@ impl App {
             5 => self.page_mail(c, env, cmds),
             6 => self.page_quota(c),
             8 => self.page_weather(c,env,cmds),
+            ALARM_PAGE => self.page_alarm(c,env),
             CALENDAR_PAGE => self.page_calendar(c,env),
             _ => self.page_settings(c),
         }
@@ -2883,6 +2894,7 @@ impl App {
     // 每帧推进：番茄钟、饮水提醒、跨天
     // ---------------------------------------------------------------
     fn tick(&mut self, env: &Env, dt: f32, elapsed: f32) {
+        self.tick_alarms(env);
         if self.toast.as_ref().is_some_and(|(_,at)|self.t-at>2.4){self.toast=None;}
         if env.today != self.today {
             self.today = env.today.clone();

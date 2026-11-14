@@ -687,7 +687,7 @@ mod tests {
 
     #[test]
     fn settings_groups_keep_every_page_reachable() {
-        let groups = ["常规", "音乐与歌词", "专注与饮水", "专注与饮水", "待办与置物", "待办与置物", "通知、邮箱与日程", "通知、邮箱与日程", "通知、邮箱与日程", "关于", "页面管理", "AI 额度", "天气"];
+        let groups = ["常规", "音乐与歌词", "专注与饮水", "专注与饮水", "待办与置物", "待办与置物", "通知、邮箱与日程", "通知、邮箱与日程", "通知、邮箱与日程", "关于", "页面管理", "AI 额度", "天气", "闹钟"];
         for (tab, expected) in groups.iter().enumerate() {
             let matches: Vec<_> = SETTINGS_GROUPS.iter().filter(|(_,start,end)| (*start..=*end).contains(&tab)).collect();
             assert_eq!(matches.len(), 1, "页面 {tab} 必须且只能属于一个分组");
@@ -857,14 +857,14 @@ fn notice_button(c:&Card,x:f32,y:f32,w:f32,text:&str,id:&str)->bool {
     b.centered_text(x+w/2.0,y+10.0,text,10.5,W::Semibold,theme::WHITE,H::Center);
     r.clicked()
 }
-fn setting_button(c:&Card,x:f32,y:f32,w:f32,text:&str,on:bool,id:&str)->bool {
+pub(crate) fn setting_button(c:&Card,x:f32,y:f32,w:f32,text:&str,on:bool,id:&str)->bool {
     let (r,b)=crate::paint::capsule(c,x,y,w,19.0,id,if on{Color32::from_rgb(39,94,150)}else{theme::BTN},theme::BTN_HOVER);
     b.text(x+w/2.0,y+13.3,text,10.5,W::Semibold,theme::WHITE,H::Center);
     r.clicked()
 }
 fn hhmm(m:u32)->String{format!("{:02}:{:02}",m/60%24,m%60)}
 /// 岛内小开关（与健康页右上开关同款）。
-fn island_switch(c:&Card,x:f32,y:f32,on:bool,id:&str)->bool{
+pub(crate) fn island_switch(c:&Card,x:f32,y:f32,on:bool,id:&str)->bool{
     let r=c.hit(x-2.0,y-2.0,38.0,24.0,id);
     let (hv,_)=c.hover_t(&r);
     let track=if on{theme::SIT_GREEN}else{Color32::from_rgb(58,58,62)};
@@ -907,7 +907,7 @@ impl App {
     }
 }
 /// 加减器：[−] 数值 [+]，右缘对齐到 right。返回 −1 / 0 / +1。
-fn stepper(c:&Card,right:f32,y:f32,value:&str,id:&str)->i32 {
+pub(crate) fn stepper(c:&Card,right:f32,y:f32,value:&str,id:&str)->i32 {
     let (w,vw)=(25.0,58.0);
     let x=right-w*2.0-vw;
     c.text(x+w+vw/2.0,y+13.0,value,10.5,W::Semibold,theme::WHITE,H::Center);
@@ -1060,6 +1060,56 @@ pub(crate) fn settings_control_row_right(ui:&mut egui::Ui,title:&str,controls:im
     settings_control_row(ui,title,SETTINGS_LABEL_W,|ui|ui.horizontal(|ui|controls(ui)).response)
 }
 
+/// 闹钟分页：只放全局默认，单条闹钟的设置在岛里的卡片上调。
+impl App {
+    pub(crate) fn alarm_settings(&mut self, ui: &mut egui::Ui) {
+        settings_label(ui, "铃声");
+        settings_card(ui, |ui| {
+            ui.horizontal(|ui| {
+                let w = (ui.available_width() - 96.0).max(140.0);
+                let mut ring = self.alarms.ring_file.clone();
+                let resp = ui.add_sized(
+                    [w, 28.0],
+                    egui::TextEdit::singleline(&mut ring).hint_text("留空 = 系统闹钟声"),
+                );
+                if resp.lost_focus() || resp.changed() {
+                    if self.alarms.ring_file != ring {
+                        self.alarms.ring_file = ring;
+                        self.alarms.save();
+                    }
+                }
+                if ui.button("试听").clicked() {
+                    let path = self.alarms.default_ring().to_string();
+                    self.alarm_player.start(&path, self.alarms.volume, false);
+                }
+            });
+            settings_hint(ui, "填音频文件的完整路径（mp3 / wav）。留空时用系统闹钟声；单条闹钟还能单独指定铃声。");
+            ui.separator();
+            let mut volume = self.alarms.volume as u32;
+            if setting_number(ui, "音量", &mut volume, 0u32, 100u32, "%", 5.0) {
+                self.alarms.volume = volume.min(100) as u8;
+                self.alarms.save();
+            }
+            ui.separator();
+            let mut snooze = self.alarms.snooze_min as i32;
+            if setting_number(ui, "默认贪睡", &mut snooze, 1i32, 60i32, " 分钟", 1.0) {
+                self.alarms.snooze_min = snooze.clamp(1, 60) as u32;
+                self.alarms.save();
+            }
+        });
+        settings_label(ui, "响铃");
+        settings_card(ui, |ui| {
+            let mut loop_ring = self.alarms.loop_ring;
+            setting_row(ui, "一直响到手停", "关掉的话，响铃 30 秒后自动安静", &mut loop_ring);
+            if loop_ring != self.alarms.loop_ring {
+                self.alarms.loop_ring = loop_ring;
+                self.alarms.save();
+            }
+        });
+        settings_hint(ui, "到点时岛仔会自己展开并停在闹钟页；点「贪睡」稍后再响，点「停止」结束。");
+    }
+}
+
 /// 设置项下方的说明文字。
 fn island_size_slider(ui:&mut egui::Ui,value:&mut u32)->egui::Response {
     let id=ui.make_persistent_id("island-size-draft");
@@ -1088,7 +1138,7 @@ pub(crate) fn settings_card(ui:&mut egui::Ui,add:impl FnOnce(&mut egui::Ui)) {
 /// 设置分页对应的功能模块（页面序号）；常规、通知、关于、页面管理不属于任何模块。
 pub(crate) fn settings_tab_module(tab:usize)->Option<usize>{
     use crate::app::*;
-    match tab {1=>Some(MUSIC_PAGE),2=>Some(FOCUS_PAGE),3=>Some(WATER_PAGE),4=>Some(TODO_PAGE),5=>Some(SHELF_PAGE),7=>Some(MAIL_PAGE),8=>Some(CALENDAR_PAGE),11=>Some(QUOTA_PAGE),12=>Some(WEATHER_PAGE),_=>None}
+    match tab {1=>Some(MUSIC_PAGE),2=>Some(FOCUS_PAGE),3=>Some(WATER_PAGE),4=>Some(TODO_PAGE),5=>Some(SHELF_PAGE),7=>Some(MAIL_PAGE),8=>Some(CALENDAR_PAGE),11=>Some(QUOTA_PAGE),12=>Some(WEATHER_PAGE),13=>Some(ALARM_PAGE),_=>None}
 }
 
 pub(crate) fn settings_label(ui:&mut egui::Ui,text:&str){
@@ -1214,9 +1264,9 @@ fn setting_choices(ui:&mut egui::Ui,title:&str,value:&mut u32,values:[u32;3],uni
     let options:Vec<(u32,&str)>=values.iter().zip(labels.iter()).map(|(v,l)|(*v,l.as_str())).collect();
     settings_control_row_right(ui,title,|ui|{settings_segmented(ui,value,&options,62.0);});
 }
-const SETTINGS_GROUPS: [(&str,usize,usize);9] = [
+const SETTINGS_GROUPS: [(&str,usize,usize);10] = [
     ("常规",0,0), ("页面管理",10,10), ("音乐与歌词",1,1), ("专注与饮水",2,3),
-    ("待办与置物",4,5), ("通知、邮箱与日程",6,8), ("AI 额度",11,11), ("天气",12,12), ("关于",9,9),
+    ("待办与置物",4,5), ("通知、邮箱与日程",6,8), ("闹钟",13,13), ("AI 额度",11,11), ("天气",12,12), ("关于",9,9),
 ];
 
 impl App {
@@ -1269,6 +1319,7 @@ impl App {
                         4=>egui::include_image!("../assets/settings-icons/system/tasks.svg"),
                         6=>egui::include_image!("../assets/settings-icons/system/notifications.svg"),
                         12=>egui::include_image!("../assets/settings-icons/system/weather.svg"),
+                        13=>egui::include_image!("../assets/settings-icons/system/notifications.svg"),
                         _=>egui::include_image!("../assets/settings-icons/system/about.svg"),
                     };
                     let icon_bg=egui::Rect::from_center_size(egui::pos2(rect.left()+21.0,rect.center().y),egui::vec2(25.0,25.0));
@@ -1299,8 +1350,8 @@ impl App {
                     }
                 }
                 ui.visuals_mut().selection.bg_fill=settings_color(ctx,Color32::from_rgb(45,105,165),Color32::from_rgb(209,226,248));
-                let titles=["常规","音乐与歌词","专注","健康提醒","待办","置物","通知","邮箱","日程","关于","页面管理","AI 额度","天气"];
-                ui.label(egui::RichText::new(titles[self.settings_tab.min(12)]).size(18.0).strong().color(settings_color(ctx,Color32::WHITE,Color32::from_rgb(30,34,41))));
+                let titles=["常规","音乐与歌词","专注","健康提醒","待办","置物","通知","邮箱","日程","关于","页面管理","AI 额度","天气","闹钟"];
+                ui.label(egui::RichText::new(titles[self.settings_tab.min(13)]).size(18.0).strong().color(settings_color(ctx,Color32::WHITE,Color32::from_rgb(30,34,41))));
                 if let Some((_,start,end))=SETTINGS_GROUPS.iter().find(|(_,start,end)|(*start..=*end).contains(&self.settings_tab)) {
                     if start!=end {
                         ui.add_space(7.0);
@@ -1336,6 +1387,7 @@ impl App {
                         if !self.module_on(page) {ui.disable();}
                     }
                     match self.settings_tab {
+                    13=>self.alarm_settings(ui),
                     12=>self.weather_settings(ui),
                     11=>self.quota_settings(ui),
                     10=>{
@@ -1350,7 +1402,7 @@ impl App {
                         });
                         settings_label(ui,"功能页面");
                         settings_card(ui,|ui|{
-                            let descriptions=["播放控制与同步歌词","番茄钟与休息计时","喝水与久坐提醒","临时收纳文件位置","任务清单与到期提醒","邮件摘要与验证码","Agent 剩余额度和账号切换","月历、邮件邀请与工作日程","当地天气与七日预报"];
+                            let descriptions=["播放控制与同步歌词","番茄钟与休息计时","喝水与久坐提醒","临时收纳文件位置","任务清单与到期提醒","邮件摘要与验证码","Agent 剩余额度和账号切换","月历、邮件邀请与工作日程","当地天气与七日预报","闹钟、倒计时与铃声"];
                             ui.label(egui::RichText::new("拖动左侧手柄调整顺序；关闭的功能不在后台运行，不同步也不提醒，已有数据保留。").size(11.5).color(settings_color(ctx,Color32::from_gray(180),Color32::from_gray(75))));
                             #[derive(Clone)]
                             struct PageDrag(usize);
