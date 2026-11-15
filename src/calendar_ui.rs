@@ -14,8 +14,18 @@ fn day_badge(date:NaiveDate)->Option<(&'static str,Color32)> {
     None
 }
 
-/// 选中日期的辅助说明：(正文, 后缀, 颜色)。节日（放假 / 逢周末 / 不放假）> 节气 > 农历日名。
+/// 选中日期的辅助说明：(正文, 后缀, 颜色)。调休上班 > 节日（放假 / 逢周末 / 不放假）> 节气 > 农历日名。
 fn day_caption(date:NaiveDate)->Option<(String,Option<&'static str>,Color32)> {
+    if matches!(lunar::official(date),Some((lunar::Kind::Work,_))) {
+        let text=match lunar::makeup_holiday(date) {
+            Some(name)=>{
+                let short=match name{"国庆节"=>"国庆","劳动节"=>"劳动",other=>other};
+                format!("补{short}班")
+            }
+            None=>"调休上班".to_string(),
+        };
+        return Some((text,None,Color32::from_gray(150)));
+    }
     if let Some((name,off))=lunar::festival_off(date) {
         let suffix=if off{"放假"}else if is_weekend(date){"逢周末"}else{"不放假"};
         return Some((name.to_string(),Some(suffix),if off{theme::RED_TOP}else{theme::YELLOW}));
@@ -40,7 +50,7 @@ fn day_tooltip(date:NaiveDate)->String {
     }
     match lunar::official(date) {
         Some((lunar::Kind::Rest,name))=>{if festival.is_none(){lines.push(format!("假期 · {name}"));}}
-        Some((lunar::Kind::Work,_))=>lines.push("调休上班".to_string()),
+        Some((lunar::Kind::Work,_))=>lines.push(match lunar::makeup_holiday(date){Some(name)=>format!("调休上班 · 补{name}的班"),None=>"调休上班".to_string()}),
         None=>{}
     }
     lines.join("\n")

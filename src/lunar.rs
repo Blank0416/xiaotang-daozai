@@ -203,6 +203,30 @@ pub fn festival_off(date: NaiveDate) -> Option<(&'static str, bool)> {
     Some((name, off))
 }
 
+/// 调休上班那天补的是哪个节日的班（数据里只写「调休上班」，看不出补哪家）。
+///
+/// 只认「班」日；找 15 天以内最近的一段「休」，就是它要补的那个假。
+pub fn makeup_holiday(date: NaiveDate) -> Option<&'static str> {
+    if !matches!(official(date), Some((Kind::Work, _))) { return None; }
+    HOLIDAYS
+        .iter()
+        .filter(|&&(_, _, kind, _)| kind == 1)
+        .filter_map(|&(start, end, _, name)| {
+            let start = from_key(start)?;
+            let end = from_key(end)?;
+            let gap = if date < start { (start - date).num_days() }
+                else if date > end { (date - end).num_days() }
+                else { 0 };
+            (gap <= 15).then_some((gap, name))
+        })
+        .min_by_key(|(gap, _)| *gap)
+        .map(|(_, name)| name)
+}
+
+fn from_key(key: i32) -> Option<NaiveDate> {
+    NaiveDate::from_ymd_opt(key / 10000, (key / 100 % 100) as u32, (key % 100) as u32)
+}
+
 /// 干支纪年，如「丙午」。
 pub fn ganzhi(year: i32) -> String {
     let cycle = (year - 4).rem_euclid(60) as usize;
@@ -284,6 +308,18 @@ mod tests {
         assert_eq!(festival_off(date(2024, 2, 9)), Some(("除夕", false)), "2024 的除夕不在法定假期里");
         assert_eq!(festival_off(date(2027, 10, 1)), Some(("国庆节", true)), "未覆盖年份退回法定节日判断");
         assert_eq!(festival_off(date(2027, 9, 10)), Some(("教师节", false)));
+    }
+
+    #[test]
+    fn makeup_workdays_point_back_at_their_holiday() {
+        assert_eq!(makeup_holiday(date(2026, 9, 20)), Some("中秋"), "中秋前那个周日上班");
+        assert_eq!(makeup_holiday(date(2026, 10, 10)), Some("国庆节"));
+        assert_eq!(makeup_holiday(date(2026, 2, 14)), Some("春节"));
+        assert_eq!(makeup_holiday(date(2026, 2, 28)), Some("春节"));
+        assert_eq!(makeup_holiday(date(2024, 4, 7)), Some("清明"));
+        assert_eq!(makeup_holiday(date(2024, 4, 28)), Some("劳动节"));
+        assert_eq!(makeup_holiday(date(2026, 9, 12)), None, "普通周末不是调休");
+        assert_eq!(makeup_holiday(date(2026, 10, 1)), None, "放假日不算调休");
     }
 
     #[test]
