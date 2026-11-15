@@ -58,8 +58,14 @@ impl App {
         // 与待办页同一套骨架：大数字基线 61，副标题 78，胶囊 96 起。
         match (&next, &stale) {
             (Some(alarm), _) => {
-                let w = c.text(42.0, 61.0, &alarm.time_text(), size::HERO, W::Bold, theme::WHITE, H::Left);
-                c.text(42.0 + w + 5.0, 60.0, &alarm.repeat_text(), size::TINY, W::Semibold, theme::YELLOW, H::Left);
+                // 贪睡中的那条：大字直接写「下一次响的时刻」，右上角标「贪睡」，
+                // 否则大字还是原来那个已经过去的点，看着像没贪睡成功。
+                let (big, color, tag) = match alarm.snooze_dt() {
+                    Some(dt) => (dt.format("%H:%M").to_string(), theme::YELLOW, "贪睡".to_string()),
+                    None => (alarm.time_text(), theme::WHITE, alarm.repeat_text()),
+                };
+                let w = c.text(42.0, 61.0, &big, size::HERO, W::Bold, color, H::Left);
+                c.text(42.0 + w + 5.0, 60.0, &tag, size::TINY, W::Semibold, theme::YELLOW, H::Left);
                 let left = alarm.minutes_until(&env.today, &now_hm).unwrap_or(0).max(0);
                 let when = alarm.next_text(&env.today, &now_hm);
                 let sub = if left < 24 * 60 { format!("{} · {}", when, human_left(left)) } else { when };
@@ -85,9 +91,9 @@ impl App {
                 let dw = (tw - cw) / 4.0;
                 let bar = (dw * 0.72).max(6.0);
                 let cy = 61.0 - size::HERO * 0.36;
-                // 空状态没必要跟真时刻一样贴左边：整块在左栏（42..196）里居中，
-                // 两块留白就对称了；有闹钟时数字照旧回到 42。
-                let left = 42.0 + ((196.0 - 42.0 - tw) * 0.5).max(0.0);
+                // 空状态没必要跟真时刻一样贴左边：整块在左栏（42..196）里居中再往左偏一点点。
+                // 完全正中会显得悬浮（下面两枚胶囊是左对齐的，偏一点更搭）；有闹钟时数字照旧回到 42。
+                let left = 42.0 + ((196.0 - 42.0 - tw) * 0.5).max(0.0) - 10.0;
                 let mut x = left;
                 for slot in 0..4 {
                     c.fill(x + (dw - bar) * 0.5, cy - 1.6, bar, 3.2, 1.6, theme::DIM);
@@ -152,6 +158,8 @@ impl App {
             let tag = alarm.repeat_text();
             let label = if expired {
                 "已过期".to_string()
+            } else if alarm.snooze_dt().is_some() {
+                "贪睡中".to_string()
             } else if alarm.label.trim().is_empty() {
                 tag.clone()
             } else {

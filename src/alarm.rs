@@ -162,10 +162,29 @@ impl Alarm {
         self.last_fired != self.target_key(today)
     }
 
+    /// 贪睡到的时间点（`YYYY-MM-DD HH:MM`）；没有在贪睡则 None。
+    pub fn snooze_dt(&self) -> Option<NaiveDateTime> {
+        let text = self.snooze_until.trim();
+        if text.is_empty() {
+            return None;
+        }
+        NaiveDateTime::parse_from_str(text, "%Y-%m-%d %H:%M").ok()
+    }
+
     /// 「下次响铃」提示。
     pub fn next_text(&self, today: &str, now_hm: &str) -> String {
         if !self.enabled {
             return "已关闭".into();
+        }
+        // 贪睡优先：这时候下一次响的是贪睡那一刻，不是原本的时刻。
+        if let Some(dt) = self.snooze_dt() {
+            let Some(today_date) = parse_date(today) else { return String::new() };
+            let time = dt.format("%H:%M").to_string();
+            return match (dt.date() - today_date).num_days() {
+                0 => format!("今天 {time}"),
+                1 => format!("明天 {time}"),
+                _ => format!("{} {time}", short_date(&dt.format("%Y-%m-%d").to_string())),
+            };
         }
         let (Some(today_date), Some(now)) = (parse_date(today), hhmm_to_min(now_hm)) else {
             return String::new();
@@ -204,6 +223,11 @@ impl Alarm {
     pub fn minutes_until(&self, today: &str, now_hm: &str) -> Option<i64> {
         let now = hhmm_to_min(now_hm)? as i64;
         let Some(today_date) = parse_date(today) else { return None };
+        // 贪睡优先：还剩几分钟到贪睡那一刻。
+        if let Some(dt) = self.snooze_dt() {
+            let days = (dt.date() - today_date).num_days() * 24 * 60;
+            return Some(days + dt.hour() as i64 * 60 + dt.minute() as i64 - now);
+        }
         let target = self.hour as i64 * 60 + self.minute as i64;
         if !self.is_repeating() {
             let date = parse_date(&self.date)?;
@@ -534,6 +558,25 @@ mod tests {
         let alarm = Alarm::new(21, 5, 0, "2026-12-01", "交作业");
         assert!(!alarm.should_ring("2026-11-14", "21:05"));
         assert!(alarm.should_ring("2026-12-01", "21:05"));
+    }
+
+    #[test]
+    fn snooze_shows_up_as_the_next_ring() {
+        // 用户报的现象：点了贪睡 5 分钟，左栏还写「今天已过 · 0 分钟后」。
+        let mut alarm = Alarm::new(15, 42, 0, "2026-11-15", "");
+        assert_eq!(alarm.minutes_until("2026-11-15", "15:42"), Some(0));
+        assert_eq!(alarm.next_text("2026-11-15", "15:43"), "今天已过");
+        alarm.snooze_until = "2026-11-15 15:47".into();
+        assert_eq!(alarm.next_text("2026-11-15", "15:43"), "今天 15:47");
+        assert_eq!(alarm.minutes_until("2026-11-15", "15:43"), Some(4));
+        // 贪睡跨午夜。
+        alarm.snooze_until = "2026-11-16 00:05".into();
+        assert_eq!(alarm.next_text("2026-11-15", "23:58"), "明天 00:05");
+        assert_eq!(alarm.minutes_until("2026-11-15", "23:58"), Some(7));
+        assert!(alarm.snooze_dt().is_some());
+        alarm.snooze_until.clear();
+        assert!(alarm.snooze_dt().is_none());
+        assert_eq!(alarm.next_text("2026-11-15", "15:43"), "今天已过");
     }
 
     #[test]
