@@ -203,6 +203,25 @@ pub fn festival_off(date: NaiveDate) -> Option<(&'static str, bool)> {
     Some((name, off))
 }
 
+/// 法定节假日当天（不看官方安排，只看《全国年节及纪念日放假办法》）：
+/// 元旦、春节（正月初一至初三）、清明、劳动节、端午、中秋、国庆（10 月 1–3 日）。
+/// 用来给国务院还没公布安排的年份兜底，免得那些假期整片空白。
+pub fn statutory_day(date: NaiveDate) -> Option<&'static str> {
+    let (month, day) = (date.month(), date.day());
+    if month == 1 && day == 1 { return Some("元旦"); }
+    if month == 10 && (1..=3).contains(&day) { return Some("国庆节"); }
+    if month == 5 && day == 1 { return Some("劳动节"); }
+    if solar_term(date) == Some("清明") { return Some("清明"); }
+    let lunar = solar_to_lunar(date)?;
+    if lunar.leap { return None; }
+    match (lunar.month, lunar.day) {
+        (1, 1..=3) => Some("春节"),
+        (5, 5) => Some("端午"),
+        (8, 15) => Some("中秋"),
+        _ => None,
+    }
+}
+
 /// 调休上班那天补的是哪个节日的班（数据里只写「调休上班」，看不出补哪家）。
 ///
 /// 只认「班」日；找 15 天以内最近的一段「休」，就是它要补的那个假。
@@ -320,6 +339,29 @@ mod tests {
         assert_eq!(makeup_holiday(date(2024, 4, 28)), Some("劳动节"));
         assert_eq!(makeup_holiday(date(2026, 9, 12)), None, "普通周末不是调休");
         assert_eq!(makeup_holiday(date(2026, 10, 1)), None, "放假日不算调休");
+    }
+
+    #[test]
+    fn statutory_days_fill_in_years_without_official_data() {
+        // 2027：国务院还没公布安排，按法定假日兜底
+        assert_eq!(statutory_day(date(2027, 1, 1)), Some("元旦"));
+        assert_eq!(statutory_day(date(2027, 10, 1)), Some("国庆节"));
+        assert_eq!(statutory_day(date(2027, 10, 3)), Some("国庆节"), "国庆法定三天");
+        assert_eq!(statutory_day(date(2027, 10, 4)), None);
+        assert_eq!(statutory_day(date(2027, 5, 1)), Some("劳动节"));
+        // 2027 春节：从正月初一数三天
+        let mut spring = vec![];
+        for day in 1..=28 {
+            let at = date(2027, 2, day);
+            let lunar = solar_to_lunar(at).unwrap();
+            if lunar.month == 1 && !lunar.leap { spring.push((lunar.day, statutory_day(at))); }
+        }
+        assert_eq!(spring.iter().find(|(d, _)| *d == 1).unwrap().1, Some("春节"), "正月初一放假");
+        assert_eq!(spring.iter().find(|(d, _)| *d == 3).unwrap().1, Some("春节"), "正月初三也放");
+        assert_eq!(spring.iter().find(|(d, _)| *d == 4).unwrap().1, None, "初四不放");
+        // 有官方数据的年份，法定当天照旧
+        assert_eq!(statutory_day(date(2026, 2, 17)), Some("春节"));
+        assert_eq!(statutory_day(date(2026, 9, 10)), None, "教师节不是法定假日");
     }
 
     #[test]
