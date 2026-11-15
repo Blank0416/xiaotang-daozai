@@ -77,8 +77,28 @@ impl App {
                 }
             }
             (None, None) => {
-                c.text(42.0, 61.0, "--:--", size::HERO, W::Bold, theme::DIM, H::Left);
-                c.text(42.0, 78.0, "还没有闹钟", size::SMALL, W::Regular, theme::GRAY, H::Left);
+                // 空状态：占位符按「07:30」的真实排布画骨架条（四个数字位各一根短杠 + 冒号两个小点），
+                // 整块宽度与大字时刻一致。直接用 "--:--" 画只有 50 逻辑宽，右端早早收住，
+                // 左栏右边就塌出一大条空白，看着像整体偏左。
+                let tw = c.text_w("07:30", size::HERO, W::Bold);
+                let cw = c.text_w(":", size::HERO, W::Bold);
+                let dw = (tw - cw) / 4.0;
+                let bar = (dw * 0.72).max(6.0);
+                let cy = 61.0 - size::HERO * 0.36;
+                // 空状态没必要跟真时刻一样贴左边：整块在左栏（42..196）里居中，
+                // 两块留白就对称了；有闹钟时数字照旧回到 42。
+                let left = 42.0 + ((196.0 - 42.0 - tw) * 0.5).max(0.0);
+                let mut x = left;
+                for slot in 0..4 {
+                    c.fill(x + (dw - bar) * 0.5, cy - 1.6, bar, 3.2, 1.6, theme::DIM);
+                    x += dw;
+                    if slot == 1 {
+                        c.circle(x + cw * 0.5, cy - 4.0, 1.4, theme::DIM);
+                        c.circle(x + cw * 0.5, cy + 4.0, 1.4, theme::DIM);
+                        x += cw;
+                    }
+                }
+                c.text(left + tw * 0.5, 78.0, "还没有闹钟", size::SMALL, W::Regular, theme::GRAY, H::Center);
             }
         }
         let (add, ac) = capsule(c, 41.0, 96.0, 74.0, 26.0, "alarm-add", theme::BTN, theme::BTN_HOVER);
