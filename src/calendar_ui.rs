@@ -1,38 +1,46 @@
 //! 岛内日程：左侧月历，右侧按时间排列邮件邀请与工作日程。
-/// 格子右上角的小角标：(字, 颜色)。优先级 休 > 班 > 农历节日 > 节气。
+fn is_weekend(date:NaiveDate)->bool {matches!(date.weekday(),chrono::Weekday::Sat|chrono::Weekday::Sun)}
+
+/// 格子右上角的小角标：(字, 颜色)。红「休」＝放假（法定假日与假期里每一天），黄「节」＝只是节日但不放假，
+/// 灰「班」＝调休上班，青「气」＝节气。
 fn day_badge(date:NaiveDate)->Option<(&'static str,Color32)> {
     match lunar::official(date) {
         Some((lunar::Kind::Rest,_))=>return Some(("休",theme::RED_TOP)),
         Some((lunar::Kind::Work,_))=>return Some(("班",Color32::from_gray(150))),
         None=>{}
     }
-    if lunar::solar_to_lunar(date).is_some_and(|lunar|lunar.festival().is_some()){return Some(("节",theme::YELLOW));}
+    if lunar::festival_off(date).is_some(){return Some(("节",theme::YELLOW));}
     if lunar::solar_term(date).is_some(){return Some(("气",Color32::from_rgb(96,205,190)));}
     None
 }
 
-/// 选中日期的辅助说明：公历节日 > 农历节日 > 节气 > 农历日名。
-fn day_caption(date:NaiveDate)->Option<(String,Color32)> {
-    if let Some(name)=lunar::solar_festival(date){return Some((name.to_string(),theme::YELLOW));}
-    let lunar=lunar::solar_to_lunar(date);
-    if let Some(name)=lunar.as_ref().and_then(|lunar|lunar.festival()){return Some((name.to_string(),theme::YELLOW));}
-    if let Some(name)=lunar::solar_term(date){return Some((name.to_string(),Color32::from_rgb(96,205,190)));}
-    lunar.map(|lunar|(lunar.text(),theme::DIM))
+/// 选中日期的辅助说明：(正文, 后缀, 颜色)。节日（放假 / 逢周末 / 不放假）> 节气 > 农历日名。
+fn day_caption(date:NaiveDate)->Option<(String,Option<&'static str>,Color32)> {
+    if let Some((name,off))=lunar::festival_off(date) {
+        let suffix=if off{"放假"}else if is_weekend(date){"逢周末"}else{"不放假"};
+        return Some((name.to_string(),Some(suffix),if off{theme::RED_TOP}else{theme::YELLOW}));
+    }
+    if let Some(name)=lunar::solar_term(date){return Some((name.to_string(),None,Color32::from_rgb(96,205,190)));}
+    lunar::solar_to_lunar(date).map(|lunar|(lunar.text(),None,theme::DIM))
 }
 
-/// 悬停提示：公历、农历、干支生肖、节气/节日、休班安排。
+/// 悬停提示：公历、农历、干支生肖、节日（放不放假）、节气、休班安排。
 fn day_tooltip(date:NaiveDate)->String {
     let weekday=["周一","周二","周三","周四","周五","周六","周日"][date.weekday().num_days_from_monday() as usize];
     let mut lines=vec![format!("{}年{}月{}日 {weekday}",date.year(),date.month(),date.day())];
     if let Some(lunar)=lunar::solar_to_lunar(date) {
         lines.push(format!("农历{} · {}{}年",lunar.text(),lunar::ganzhi(lunar.year),lunar::zodiac(lunar.year)));
-        if let Some(name)=lunar.festival(){lines.push(name.to_string());}
     }
-    if let Some(name)=lunar::solar_term(date){lines.push(format!("节气 · {name}"));}
-    if let Some(name)=lunar::solar_festival(date){lines.push(name.to_string());}
+    let festival=lunar::festival_off(date);
+    if let Some((name,off))=festival {
+        lines.push(if off{format!("放假 · {name}")}else if is_weekend(date){format!("节日 · {name}（逢周末）")}else{format!("节日 · {name}（不放假）")});
+    }
+    if let Some(name)=lunar::solar_term(date) {
+        if festival.map_or(true,|(festival_name,_)|festival_name!=name){lines.push(format!("节气 · {name}"));}
+    }
     match lunar::official(date) {
-        Some((lunar::Kind::Rest,name))=>lines.push(format!("休 · {name}")),
-        Some((lunar::Kind::Work,_))=>lines.push("班 · 调休上班".to_string()),
+        Some((lunar::Kind::Rest,name))=>{if festival.is_none(){lines.push(format!("假期 · {name}"));}}
+        Some((lunar::Kind::Work,_))=>lines.push("调休上班".to_string()),
         None=>{}
     }
     lines.join("\n")
@@ -319,8 +327,14 @@ impl App {
         let big=format!("{}月{}日",day.month(),day.day());
         let big_width=c.text_w(&big,14.0,W::Semibold);
         c.text(40.0,61.0,&big,14.0,W::Semibold,theme::WHITE,H::Left);
-        if let Some((caption,tint))=day_caption(day) {
-            c.text((40.0+big_width+7.0).min(112.0),61.0,&caption,8.4,W::Regular,tint,H::Left);
+        if let Some((caption,suffix,tint))=day_caption(day) {
+            let start=(40.0+big_width+7.0).min(112.0);
+            let end=c.text(start,61.0,&caption,8.4,W::Regular,tint,H::Left);
+            if let Some(suffix)=suffix {
+                // 放不放假的标签用更小的字号跟在节日名后面，放不下就只留颜色（红＝放假，黄＝不放假）。
+                let width=c.text_w(suffix,7.0,W::Regular);
+                if end+3.0+width<=155.0 {c.text(end+3.0,61.0,suffix,7.0,W::Regular,tint,H::Left);}
+            }
         }
         let month=self.calendar.view.month;
         c.centered_text(45.0,80.0,"‹",14.0,W::Regular,muted,H::Center);

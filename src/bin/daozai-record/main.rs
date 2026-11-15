@@ -10,7 +10,7 @@ use eframe::egui::{self, Color32, Event, Pos2, Rect, Shape, Stroke, Vec2};
 use daozai::app::{App, Cmd, Env, FrameOut, Options, WIN_H, WIN_W};
 use daozai::lyrics;
 use daozai::smtc::{NowPlaying, Transport};
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -629,6 +629,15 @@ fn page_check() {
     let mut now_clock = "10:28:00".to_string();
     let mut today = "2026-10-28".to_string();
     let mut date_label = "10月28日 周三".to_string();
+    if let Some(index) = std::env::args().position(|a| a == "--today") {
+        if let Some(value) = std::env::args().nth(index + 1) {
+            if let Ok(date) = NaiveDate::parse_from_str(&value, "%Y-%m-%d") {
+                let weekday = ["周一","周二","周三","周四","周五","周六","周日"][date.weekday().num_days_from_monday() as usize];
+                date_label = format!("{}月{}日 {weekday}", date.month(), date.day());
+                today = value;
+            }
+        }
+    }
     if std::env::args().any(|a| a == "--stale") {
         // 复现用户现场：23:47 时那条「今天 11:30」的一次性闹钟已经过点。
         std::fs::write(data.join("alarms.txt"), "a|1|11:30|0|2026-11-14|5||||洗衣服\na|1|09:00|31||5||||周会提醒\n").unwrap();

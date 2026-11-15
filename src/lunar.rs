@@ -177,6 +177,32 @@ pub fn official(date: NaiveDate) -> Option<(Kind, &'static str)> {
         .map(|&(_, _, kind, name)| (if kind == 1 { Kind::Rest } else { Kind::Work }, name))
 }
 
+/// 法定放假的节日（国务院《全国年节及纪念日放假办法》里的那几个）。
+pub fn statutory(name: &str) -> bool {
+    matches!(name, "元旦" | "春节" | "除夕" | "清明" | "劳动节" | "端午" | "中秋" | "国庆节")
+}
+
+/// 当年有没有节假日数据（国务院每年才公布一次，表里只覆盖 2024–2026）。
+pub fn year_covered(year: i32) -> bool {
+    HOLIDAYS.iter().any(|&(from, ..)| from / 10000 == year)
+}
+
+/// 该日若是节日，返回 (节日名, 是否放假)。
+///
+/// 「放假」以当年的官方安排为准（只有法定节假日与调休会进表，普通周末不算）；
+/// 官方安排还没覆盖到的年份退回「法定节日」判断，宁可标成不放假也不乱造假期。
+pub fn festival_off(date: NaiveDate) -> Option<(&'static str, bool)> {
+    let name = solar_festival(date)
+        .or_else(|| solar_to_lunar(date).and_then(|lunar| lunar.festival()))
+        .or_else(|| if solar_term(date) == Some("清明") { Some("清明") } else { None })?;
+    let off = match official(date) {
+        Some((Kind::Rest, _)) => true,
+        Some((Kind::Work, _)) => false,
+        None => !year_covered(date.year()) && statutory(name),
+    };
+    Some((name, off))
+}
+
 /// 干支纪年，如「丙午」。
 pub fn ganzhi(year: i32) -> String {
     let cycle = (year - 4).rem_euclid(60) as usize;
@@ -244,6 +270,20 @@ mod tests {
         assert_eq!(official(date(2026, 10, 1)), Some((Kind::Rest, "国庆节")));
         assert_eq!(official(date(2026, 10, 10)), Some((Kind::Work, "调休上班")));
         assert_eq!(official(date(2026, 11, 15)), None, "普通周末不算法定节假日");
+    }
+
+    #[test]
+    fn festival_off_tells_holidays_from_plain_festivals() {
+        assert_eq!(festival_off(date(2026, 10, 1)), Some(("国庆节", true)));
+        assert_eq!(festival_off(date(2026, 2, 17)), Some(("春节", true)));
+        assert_eq!(festival_off(date(2026, 4, 5)), Some(("清明", true)), "清明是节气也是法定假日");
+        assert_eq!(festival_off(date(2026, 9, 10)), Some(("教师节", false)));
+        assert_eq!(festival_off(date(2026, 10, 18)), Some(("重阳", false)));
+        assert_eq!(festival_off(date(2026, 12, 25)), Some(("圣诞节", false)));
+        assert_eq!(festival_off(date(2026, 10, 5)), None, "假期中间那天不是节日");
+        assert_eq!(festival_off(date(2024, 2, 9)), Some(("除夕", false)), "2024 的除夕不在法定假期里");
+        assert_eq!(festival_off(date(2027, 10, 1)), Some(("国庆节", true)), "未覆盖年份退回法定节日判断");
+        assert_eq!(festival_off(date(2027, 9, 10)), Some(("教师节", false)));
     }
 
     #[test]
