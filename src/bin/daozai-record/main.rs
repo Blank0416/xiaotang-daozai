@@ -10,6 +10,7 @@ use eframe::egui::{self, Color32, Event, Pos2, Rect, Shape, Stroke, Vec2};
 use daozai::app::{App, Cmd, Env, FrameOut, Options, WIN_H, WIN_W};
 use daozai::lyrics;
 use daozai::smtc::{NowPlaying, Transport};
+use chrono::NaiveDate;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -637,6 +638,7 @@ fn page_check() {
     }
     let ctx = egui::Context::default();
     let mut app = App::new(&ctx, Options { fetch_lyrics: false, pet_idle: 45.0 });
+    if let Ok(date) = NaiveDate::parse_from_str(&today, "%Y-%m-%d") { app.select_calendar_day(date); }
     let mut ras = raster::Raster::new(1280, 380);
     let mut rgba = vec![];
     for frame in 0..40 {

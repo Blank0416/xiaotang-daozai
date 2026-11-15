@@ -1,5 +1,44 @@
 //! 岛内日程：左侧月历，右侧按时间排列邮件邀请与工作日程。
-use crate::{app::{App, Cmd, Env, CALENDAR_PAGE}, calendar, mail, paint::{self,Card,H}, theme::{self,W}};
+/// 格子右上角的小角标：(字, 颜色)。优先级 休 > 班 > 农历节日 > 节气。
+fn day_badge(date:NaiveDate)->Option<(&'static str,Color32)> {
+    match lunar::official(date) {
+        Some((lunar::Kind::Rest,_))=>return Some(("休",theme::RED_TOP)),
+        Some((lunar::Kind::Work,_))=>return Some(("班",Color32::from_gray(150))),
+        None=>{}
+    }
+    if lunar::solar_to_lunar(date).is_some_and(|lunar|lunar.festival().is_some()){return Some(("节",theme::YELLOW));}
+    if lunar::solar_term(date).is_some(){return Some(("气",Color32::from_rgb(96,205,190)));}
+    None
+}
+
+/// 选中日期的辅助说明：公历节日 > 农历节日 > 节气 > 农历日名。
+fn day_caption(date:NaiveDate)->Option<(String,Color32)> {
+    if let Some(name)=lunar::solar_festival(date){return Some((name.to_string(),theme::YELLOW));}
+    let lunar=lunar::solar_to_lunar(date);
+    if let Some(name)=lunar.as_ref().and_then(|lunar|lunar.festival()){return Some((name.to_string(),theme::YELLOW));}
+    if let Some(name)=lunar::solar_term(date){return Some((name.to_string(),Color32::from_rgb(96,205,190)));}
+    lunar.map(|lunar|(lunar.text(),theme::DIM))
+}
+
+/// 悬停提示：公历、农历、干支生肖、节气/节日、休班安排。
+fn day_tooltip(date:NaiveDate)->String {
+    let weekday=["周一","周二","周三","周四","周五","周六","周日"][date.weekday().num_days_from_monday() as usize];
+    let mut lines=vec![format!("{}年{}月{}日 {weekday}",date.year(),date.month(),date.day())];
+    if let Some(lunar)=lunar::solar_to_lunar(date) {
+        lines.push(format!("农历{} · {}{}年",lunar.text(),lunar::ganzhi(lunar.year),lunar::zodiac(lunar.year)));
+        if let Some(name)=lunar.festival(){lines.push(name.to_string());}
+    }
+    if let Some(name)=lunar::solar_term(date){lines.push(format!("节气 · {name}"));}
+    if let Some(name)=lunar::solar_festival(date){lines.push(name.to_string());}
+    match lunar::official(date) {
+        Some((lunar::Kind::Rest,name))=>lines.push(format!("休 · {name}")),
+        Some((lunar::Kind::Work,_))=>lines.push("班 · 调休上班".to_string()),
+        None=>{}
+    }
+    lines.join("\n")
+}
+
+use crate::{app::{App, Cmd, Env, CALENDAR_PAGE}, calendar, lunar, mail, paint::{self,Card,H}, theme::{self,W}};
 use chrono::{Datelike, NaiveDate};
 use eframe::egui::{self,Color32};
 
@@ -213,7 +252,7 @@ impl App {
         self.request_calendar_month(false);
     }
 
-    pub(crate) fn select_calendar_day(&mut self, day:NaiveDate) {
+    pub fn select_calendar_day(&mut self, day:NaiveDate) {
         let month=calendar::month_start(day);
         if month!=self.calendar.view.month {self.calendar.view.month=month;self.calendar.view.loading=false;self.calendar.view.error.clear();self.calendar.view.warning.clear();}
         self.calendar.view.day=day;
@@ -277,7 +316,12 @@ impl App {
         let day=self.calendar.view.day;
         let weekday=["星期一","星期二","星期三","星期四","星期五","星期六","星期日"][day.weekday().num_days_from_monday() as usize];
         c.text(40.0,42.0,weekday,9.0,W::Regular,accent,H::Left);
-        c.text(40.0,61.0,&format!("{}月{}日",day.month(),day.day()),14.0,W::Semibold,theme::WHITE,H::Left);
+        let big=format!("{}月{}日",day.month(),day.day());
+        let big_width=c.text_w(&big,14.0,W::Semibold);
+        c.text(40.0,61.0,&big,14.0,W::Semibold,theme::WHITE,H::Left);
+        if let Some((caption,tint))=day_caption(day) {
+            c.text((40.0+big_width+7.0).min(112.0),61.0,&caption,8.4,W::Regular,tint,H::Left);
+        }
         let month=self.calendar.view.month;
         c.centered_text(45.0,80.0,"‹",14.0,W::Regular,muted,H::Center);
         c.centered_text(87.0,80.0,&format!("{}年{}月",month.year(),month.month()),9.5,W::Regular,theme::GRAY,H::Center);
@@ -308,13 +352,20 @@ impl App {
             let hit=c.hit(x-8.75,y-7.0,17.5,16.5,("calendar-day",date));
             if selected || hit.hovered(){c.circle(x,y-0.6,6.3,if selected{accent}else{Color32::from_gray(36)});}
             if *date==today && !selected{c.ring(x,y-0.6,6.3,0.8,accent);}
-            let color=if selected{theme::WHITE}else if date.month()!=self.calendar.view.month.month(){Color32::from_gray(82)}else{Color32::from_gray(219)};
+            let rest=matches!(lunar::official(*date),Some((lunar::Kind::Rest,_)));
+            let color=if selected{theme::WHITE}else if date.month()!=self.calendar.view.month.month(){Color32::from_gray(82)}else if rest{theme::RED_TOP}else{Color32::from_gray(219)};
             c.centered_text(x,y,&date.day().to_string(),10.2,W::Regular,color,H::Center);
+            if let Some((label,tint))=day_badge(*date) {
+                c.centered_text(x+6.3,y-5.5,label,5.4,W::Semibold,if selected{theme::WHITE}else{tint},H::Center);
+            }
             if let Some(colors)=dots.get(date){for (i,color) in colors.iter().enumerate(){c.circle(x+(i as f32-(colors.len()-1) as f32/2.0)*2.8,y+8.6,0.9,*color);}}
-            if hit.on_hover_text(date.format("%Y年%m月%d日").to_string()).clicked(){self.select_calendar_day(*date);}
+            if hit.on_hover_text(day_tooltip(*date)).clicked(){self.select_calendar_day(*date);}
         }
         let day=self.calendar.view.day;
-        let heading=format!("{} · {}月{}日",if day==today{"今天"}else{["周一","周二","周三","周四","周五","周六","周日"][day.weekday().num_days_from_monday() as usize]},day.month(),day.day());
+        let prefix=if day==today{"今天".to_string()}else{["周一","周二","周三","周四","周五","周六","周日"][day.weekday().num_days_from_monday() as usize].to_string()};
+        let week=lunar::iso_week(day);
+        let long=format!("{prefix} · {}月{}日 · 第{week}周",day.month(),day.day());
+        let heading=if c.text_w(&long,8.8,W::Semibold)<=200.0{long}else{format!("{prefix} · {}月{}日",day.month(),day.day())};
         c.text(167.0,44.0,&heading,8.8,W::Semibold,accent,H::Left);
         let status=if self.calendar.view.loading{"同步中".to_string()}else if !self.calendar.view.error.is_empty(){"重试同步".to_string()}else if !self.calendar.view.warning.is_empty(){"部分同步".to_string()}else {let at=self.calendar.feeds.iter().map(|feed|feed.last_sync.as_str()).max().unwrap_or(&self.calendar.last_sync);if at.is_empty(){"".into()}else{format!("{} 更新",at.split_whitespace().last().unwrap_or(""))}};
         c.text(376.0,44.0,&status,7.4,W::Regular,muted,H::Right);
