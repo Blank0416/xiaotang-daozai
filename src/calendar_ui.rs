@@ -3,6 +3,7 @@ fn is_weekend(date:NaiveDate)->bool {matches!(date.weekday(),chrono::Weekday::Sa
 
 /// 格子右上角的小角标：(字, 颜色)。红「休」＝放假（法定假日与假期里每一天），黄「节」＝只是节日但不放假，
 /// 灰「班」＝调休上班，青「气」＝节气。
+#[allow(dead_code)]
 fn day_badge(date:NaiveDate)->Option<(&'static str,Color32)> {
     match lunar::official(date) {
         Some((lunar::Kind::Rest,_))=>return Some(("休",theme::RED_TOP)),
@@ -12,6 +13,15 @@ fn day_badge(date:NaiveDate)->Option<(&'static str,Color32)> {
     if lunar::festival_off(date).is_some(){return Some(("节",theme::YELLOW));}
     if lunar::solar_term(date).is_some(){return Some(("气",Color32::from_rgb(96,205,190)));}
     None
+}
+
+/// 格子里的第二行：放假写「休」、调休上班写「班」，是不是节日不管——只看这天用不用上班。
+fn day_mark(date:NaiveDate)->Option<(&'static str,Color32)> {
+    match lunar::official(date) {
+        Some((lunar::Kind::Rest,_))=>Some(("休",theme::RED_TOP)),
+        Some((lunar::Kind::Work,_))=>Some(("班",Color32::from_gray(150))),
+        None=>None,
+    }
 }
 
 /// 选中日期的辅助说明：(正文, 后缀, 颜色)。调休上班 > 节日（放假 / 逢周末 / 不放假）> 节气 > 农历日名。
@@ -376,11 +386,22 @@ impl App {
             let hit=c.hit(x-8.75,y-7.0,17.5,16.5,("calendar-day",date));
             if selected || hit.hovered(){c.circle(x,y-0.6,6.3,if selected{accent}else{Color32::from_gray(36)});}
             if *date==today && !selected{c.ring(x,y-0.6,6.3,0.8,accent);}
-            let rest=matches!(lunar::official(*date),Some((lunar::Kind::Rest,_)));
-            let color=if selected{theme::WHITE}else if date.month()!=self.calendar.view.month.month(){Color32::from_gray(82)}else if rest{theme::RED_TOP}else{Color32::from_gray(219)};
+            let official=lunar::official(*date);
+            let rest=matches!(official,Some((lunar::Kind::Rest,_)));
+            let work=matches!(official,Some((lunar::Kind::Work,_)));
+            let in_month=date.month()==self.calendar.view.month.month();
+            let color=if selected{theme::WHITE}else if !in_month{Color32::from_gray(82)}else if rest{theme::RED_TOP}else if work{Color32::from_gray(150)}else{Color32::from_gray(219)};
+            // 整格淡淡上色：放假偏红、调休上班偏灰，配合下面那行小字，扫一眼就知道哪几天不上班。
+            if in_month {
+                if rest{c.fill(x-8.4,y-7.6,16.8,15.0,3.4,Color32::from_rgb(34,14,13));}
+                else if work{c.fill(x-8.4,y-7.6,16.8,15.0,3.4,Color32::from_rgb(17,17,17));}
+            }
             c.centered_text(x,y,&date.day().to_string(),10.2,W::Regular,color,H::Center);
-            if let Some((label,tint))=day_badge(*date) {
-                c.centered_text(x+6.3,y-5.5,label,5.4,W::Semibold,if selected{theme::WHITE}else{tint},H::Center);
+            // 数字下面直接写「休」/「班」，不用点开当天就知道上不上班。
+            if in_month {
+                if let Some((label,tint))=day_mark(*date) {
+                    c.centered_text(x,y+5.0,label,5.2,W::Semibold,if selected{theme::WHITE}else{tint},H::Center);
+                }
             }
             if let Some(colors)=dots.get(date){for (i,color) in colors.iter().enumerate(){c.circle(x+(i as f32-(colors.len()-1) as f32/2.0)*2.8,y+8.6,0.9,*color);}}
             if hit.on_hover_text(day_tooltip(*date)).clicked(){self.select_calendar_day(*date);}
