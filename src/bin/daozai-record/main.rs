@@ -285,6 +285,8 @@ fn cursor_shapes(at: Pos2, press: f32, dragging: Option<f32>) -> Vec<Shape> {
 fn main() {
     if std::env::args().any(|a|a=="--gallery"){gallery();return;}
     if std::env::args().any(|a|a=="--alarm-check"){alarm_check();return;}
+    if std::env::args().any(|a|a=="--alarm-collapsed"){alarm_collapsed_check(false);return;}
+    if std::env::args().any(|a|a=="--alarm-stop"){alarm_collapsed_check(true);return;}
 if std::env::args().any(|a|a=="--page"){page_check();return;}
     let out_path = std::env::args().nth(1).unwrap_or_else(|| "daozai-demo.mp4".into());
     let (root, drag_file) = setup_data();
@@ -530,6 +532,44 @@ if std::env::args().any(|a|a=="--page"){page_check();return;}
     let _ = ff.wait();
     let _ = std::fs::remove_dir_all(root);
     eprintln!("{frame_no} 帧 → {out_path}");
+}
+
+/// 收起态响铃自检：岛先收着在胶囊里待着，等闹钟到点，再逐帧导出，
+/// 核对面板有没有被撑到正确尺寸（用户现场：收起态响铃只露出左上角一截）。
+fn alarm_collapsed_check(stop: bool) {
+    let (root, _) = setup_data();
+    let data = root.join("data");
+    let dest = std::env::args().nth(2).unwrap_or_else(|| "alarm-collapsed".into());
+    std::fs::create_dir_all(&dest).unwrap();
+    std::fs::write(data.join("alarms.txt"), "a|1|10:28|127||5||||该起来了\n").unwrap();
+    let ctx = egui::Context::default();
+    let mut app = App::new(&ctx, Options { fetch_lyrics: false, pet_idle: 45.0 });
+    let mut ras = raster::Raster::new(1280, 380);
+    // stop 场景：响铃稳定后在第 380 帧直接调用 dismiss_alarm，模拟用户点「停止」，再看面板还正不正。
+    let shots: &[usize] = if stop { &[370, 379, 381, 383, 386, 390, 399, 430, 470, 500] } else { &[330, 345, 350, 351, 352, 354, 356, 360, 370, 399] };
+    let total = if stop { 501 } else { 400 };
+    let tag = if stop { "stopped" } else { "collapsed" };
+    for frame in 0..total {
+        let t = frame as f64 / 60.0;
+        let clock = if frame >= 350 { "10:28:00" } else { "10:27:00" };
+        let env = Env { t, clock: clock.into(), today: "2026-10-28".into(), date: "10月28日 周三".into(), battery: Some(76), charging: true, cursor: None, idle_seconds: Some(0.0), ..Default::default() };
+        // 只在首帧切页：show_page 会顺带强制展开 4 秒，每帧调用就永远复现不出收起态。
+        if frame == 0 { app.show_page(9); }
+        if stop && frame == 380 { app.dismiss_alarm(); }
+        let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(640.0, 190.0))), time: Some(t), viewports: std::iter::once((egui::ViewportId::ROOT, egui::ViewportInfo { native_pixels_per_point: Some(2.0), ..Default::default() })).collect(), ..Default::default() };
+        let output = ctx.run(raw, |ctx| { egui::CentralPanel::default().frame(egui::Frame::new().fill(Color32::from_rgb(23, 28, 45))).show(ctx, |ui| { let win = ui.max_rect(); app.frame(ui, win, &env); }); });
+        ras.update_textures(&output.textures_delta);
+        if shots.contains(&frame) {
+            let mut rgba = vec![];
+            ras.buf.fill([0.09, 0.11, 0.18, 1.0]);
+            ras.draw(&ctx.tessellate(output.shapes, output.pixels_per_point), output.pixels_per_point);
+            ras.to_rgba8(&mut rgba);
+            std::fs::write(format!("{dest}/{tag}-{frame:03}.rgba"), &rgba).unwrap();
+            eprintln!("frame {frame} progress={:.3} page={}", app.progress(), app.page());
+        }
+        ras.free_textures(&output.textures_delta);
+    }
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 /// 闹钟页自检：空状态、三条闹钟、编辑弹层、响铃四帧，导出原始 RGBA 供人工核对版式。

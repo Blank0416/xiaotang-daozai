@@ -2595,7 +2595,9 @@ impl App {
             }
         }
         let _ = inside;
-        if self.open {self.h.target=self.expanded_height();}
+        // 程序自己把岛撑开（闹钟响铃、新提醒）时也要锁住完整面板尺寸：
+        // 只拉高度不拉宽度，面板就成了「胶囊宽 × 面板高」，内容按 419 宽绘制后左右被裁掉。
+        if self.open {self.w.target=PW;self.h.target=self.expanded_height();}
         let (prev_w,prev_h)=(self.w.pos,self.h.pos);
         self.w.step(dt);
         self.h.step(dt);

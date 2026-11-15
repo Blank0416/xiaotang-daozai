@@ -409,7 +409,7 @@ impl App {
         self.say(format!("{minutes} 分钟后再提醒"));
     }
 
-    fn dismiss_alarm(&mut self) {
+    pub fn dismiss_alarm(&mut self) {
         let was_ringing = self.alarm_ring.take().is_some();
         if was_ringing {
             self.alarm_player.stop();
