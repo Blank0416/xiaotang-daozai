@@ -4,7 +4,7 @@
 
 use crate::alarm::{Alarm, Draft, Ringing, SNOOZE_MAX, SNOOZE_MIN};
 use crate::app::{App, Cmd, Env, ALARM_PAGE};
-use crate::extras::{island_switch, setting_button, stepper};
+use crate::extras::{island_switch, setting_button};
 use crate::paint::{self, capsule, Card, H};
 use crate::theme::{self, size, W};
 use eframe::egui::{self, Color32, Pos2, Rect};
