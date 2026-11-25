@@ -4,6 +4,12 @@
 每个 **tag = 一版**，对应 Releases 里的一条记录（附该版可执行文件），历史版本可随时回退下载。
 版本号跟随上游（当前 `0.6.66`），用 `alarm-test-N` 后缀区分测试迭代。
 
+## alarm-test-13（托盘图标：注册重试 + 诊断日志）
+
+- 根因不在代码：exe 继承了 `D:\桌面\AI项目` 目录的 Low 完整性标签（`Mandatory Label\Low Mandatory Level:(OI)(CI)(NW)`），Windows 以 Low IL 启动，于是 ① 写不了 `%APPDATA%\Daozai`（no-write-up）② 不能给 Medium 的 explorer 发消息（UIPI）→ NIM_ADD / NIM_MODIFY 一律返回 5（ACCESS_DENIED）。给 exe 打 `icacls /setintegritylevel M` 后进程 IL 变 Medium（实测 4096→8192），托盘一次注册成功。
+- 代码侧加固：`add_icon` 失败重试 4 次（间隔 80+attempt*120 ms），启动那次仍失败则挂 1.2 s 定时器继续重试（最多 10 次），全程写 `%APPDATA%\Daozai\diagnostics\tray.log`；`WM_TRAY_DUMP` 诊断里增加 config_dir / last_err / mkdir / probe_write / log_fail。
+- 交付：`岛仔闹钟测试版\v20\daozai.exe`（md5 `bb64bf203f7cc56193f124a5031d04ee`，已打 Medium 标签）。
+
 ## alarm-test-12（验证码大卡热区覆盖「点击复制」行）
 
 - 邮箱页验证码大卡的点击热区原来只圈住数字那一行（y 56–94），「点击复制」这行小字在它下面，看着点在字上却没反应，得往上瞄一点才行。现在热区改到整块下半卡（y 56–118），点数字、点邮件主题、点「点击复制」/「已隐藏 · 点击查看」都能生效。
