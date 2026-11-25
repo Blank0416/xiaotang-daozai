@@ -1103,7 +1103,9 @@ impl App {
             c.text(46.0,108.0,if hidden{"已隐藏 · 点击查看"}else{"点击复制"},10.5,W::Regular,theme::DIM,H::Left);
             c.text(166.0,108.0,item.time.rsplit(' ').next().unwrap_or(&item.time),10.0,W::Regular,theme::GRAY,H::Right);
             c.hit(42.0,38.0,128.0,16.0,"mail-code-source").on_hover_text(format!("来自：{}\n{}\n收件邮箱：{}\n{}",item.from,item.subject,item.account,item.time));
-            if c.hit(40.0,56.0,132.0,38.0,("mail-code",item.uid)).on_hover_text(format!("复制 {} 的验证码",item.from)).clicked(){if hidden{self.reveal_mail_code(raw);}else{cmds.push(Cmd::Copy(value.to_string()));self.code_copied(value);}}
+            // 热区覆盖整块下半卡（验证码 + 主题 + 「点击复制」/「已隐藏 · 点击查看」行），
+            // 只圈住数字会让用户点在那行小字上却没有任何反应。
+            if c.hit(40.0,56.0,132.0,62.0,("mail-code",item.uid)).on_hover_text(format!("复制 {} 的验证码",item.from)).clicked(){if hidden{self.reveal_mail_code(raw);}else{cmds.push(Cmd::Copy(value.to_string()));self.code_copied(value);}}
         }
         use crate::mail_manage::{Action,Folder};
         let folder=self.mail.manage.folder();let trash=folder==Folder::Trash;

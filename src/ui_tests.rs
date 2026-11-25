@@ -3450,6 +3450,14 @@ fn mail_page_shows_code_and_copies_on_click() {
     h.app.show_page(5);
     h.hover(Pos2::new(WIN_W / 2.0, 12.0), 0.6);
     h.hover(H::local(300.0, 60.0), 0.4);
+    // 「点击复制」这行小字（y≈108）同样属于热区，不必瞄准上方的数字。
+    h.click(H::local(60.0, 108.0));
+    assert!(
+        h.cmds.iter().any(|c| matches!(c, crate::app::Cmd::Copy(t) if t == "482913")),
+        "点「点击复制」这行小字也应复制: {:?}",
+        h.cmds
+    );
+    h.cmds.clear();
     h.click(H::local(60.0, 70.0));
     assert!(
         h.cmds.iter().any(|c| matches!(c, crate::app::Cmd::Copy(t) if t == "482913")),
