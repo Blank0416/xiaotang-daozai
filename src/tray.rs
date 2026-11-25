@@ -46,6 +46,7 @@ const CMD_ABOUT: u32 = 4;
 const CMD_MINIMAL: u32 = 5;
 const CMD_SETTINGS:u32=6;
 const TIMER_MENU: usize = 12;
+const TIMER_TRAY_RETRY: usize = 13;
 
 const RUN_KEY: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
 const RUN_VALUE: PCWSTR = w!("Daozai");
@@ -71,6 +72,7 @@ struct Ctx {
     before_exit: Box<dyn Fn() + Send>,
     added: AtomicBool,
     adds: AtomicU32,
+    retries: AtomicU32,
 }
 
 impl Ctx {
@@ -143,6 +145,39 @@ fn load_icon() -> Option<HICON> {
     load_resource_icon().or_else(load_embedded_icon)
 }
 
+/// 托盘诊断日志：%APPDATA%\Daozai\diagnostics\tray.log（GUI 没有控制台，
+/// eprintln 等于扔掉，NIM_ADD 失败时只能靠文件留下错误码）。
+/// 上一次托盘错误码（dump 里带出去）。
+static LAST_TRAY_ERR: AtomicU32 = AtomicU32::new(0);
+/// tray_log 自身失败的原因（dump 里带出去）。
+static LOG_FAIL: std::sync::OnceLock<Mutex<String>> = std::sync::OnceLock::new();
+
+fn log_fail(why: String) {
+    let m = LOG_FAIL.get_or_init(|| Mutex::new(String::new()));
+    if let Ok(mut s) = m.lock() {
+        *s = why;
+    }
+}
+
+fn tray_log(msg: &str) {
+    use std::io::Write;
+    let dir = crate::model::config_dir().join("diagnostics");
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        log_fail(format!("create_dir_all {}: {e}", dir.display()));
+        return;
+    }
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    match std::fs::OpenOptions::new().create(true).append(true).open(dir.join("tray.log")) {
+        Ok(mut f) => {
+            let _ = writeln!(f, "{stamp} {msg}");
+        }
+        Err(e) => log_fail(format!("open {}: {e}", dir.join("tray.log").display())),
+    }
+}
+
 fn add_icon(hwnd: HWND, hicon: HICON) -> bool {
     let mut nid = NOTIFYICONDATAW {
         cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
@@ -155,11 +190,35 @@ fn add_icon(hwnd: HWND, hicon: HICON) -> bool {
     };
     fill_tip(&mut nid.szTip, "岛仔");
     unsafe {
-        if !Shell_NotifyIconW(NIM_ADD, &nid).as_bool() {
+        let mut last = 0u32;
+        for attempt in 0..4u32 {
+            if Shell_NotifyIconW(NIM_ADD, &nid).as_bool() {
+                if attempt > 0 {
+                    tray_log(&format!("NIM_ADD ok after {attempt} retries"));
+                }
+                return true;
+            }
+            last = GetLastError().0;
+            LAST_TRAY_ERR.store(last, Ordering::Relaxed);
             // explorer 里已有同名残留时，用 MODIFY 顶掉
-            return Shell_NotifyIconW(NIM_MODIFY, &nid).as_bool();
+            if Shell_NotifyIconW(NIM_MODIFY, &nid).as_bool() {
+                if attempt > 0 {
+                    tray_log(&format!("NIM_MODIFY ok after {attempt} retries"));
+                }
+                return true;
+            }
+            tray_log(&format!(
+                "attempt {attempt} failed: NIM_ADD/MODIFY err={last}, hwnd={:?}, hicon={:?}, cbSize={}, taskbar_busy={}",
+                hwnd.0,
+                hicon.0,
+                nid.cbSize,
+                last == 1460
+            ));
+            if attempt < 3 {
+                std::thread::sleep(Duration::from_millis(80 + attempt as u64 * 120));
+            }
         }
-        true
+        false
     }
 }
 
@@ -242,6 +301,21 @@ fn dump_menu(hwnd: HWND, ctx: &Ctx, menu: HMENU) {
         let state = ctx.state();
         let mut body = String::new();
         body.push_str(&format!("hwnd=0x{:X}\n", hwnd.0 as usize));
+        let dir = crate::model::config_dir();
+        body.push_str(&format!("config_dir={}\n", dir.display()));
+        body.push_str(&format!("last_err={}\n", LAST_TRAY_ERR.load(Ordering::Relaxed)));
+        let dg = dir.join("diagnostics");
+        body.push_str(&format!(
+            "mkdir={:?}\n",
+            std::fs::create_dir_all(&dg).map_err(|e| e.to_string())
+        ));
+        body.push_str(&format!(
+            "probe_write={:?}\n",
+            std::fs::write(dg.join("_probe.txt"), b"ok").map_err(|e| e.to_string())
+        ));
+        if let Some(m) = LOG_FAIL.get() {
+            body.push_str(&format!("log_fail={:?}\n", m.lock().map(|s| s.clone()).unwrap_or_default()));
+        }
         body.push_str(&format!("icon_added={}\n", ctx.added.load(Ordering::Relaxed)));
         body.push_str(&format!("icon_adds={}\n", ctx.adds.load(Ordering::Relaxed)));
         body.push_str(&format!("autostart={}\n", state.autostart));
@@ -335,6 +409,22 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     }
     if msg == WM_TRAY_MENU {
         show_menu_at(hwnd, ctx, wp.0 as i32, lp.0 as i32);
+        return LRESULT(0);
+    }
+    // explorer 有时在启动瞬间还没准备好收图标（NIM_ADD 返回 ERROR_TIMEOUT），
+    // 用定时器补挂，最多 10 次。
+    if msg == WM_TIMER && wp.0 == TIMER_TRAY_RETRY {
+        if ctx.added.load(Ordering::Relaxed) {
+            let _ = KillTimer(hwnd, TIMER_TRAY_RETRY);
+        } else if ctx.retries.fetch_add(1, Ordering::Relaxed) >= 10 {
+            tray_log("timer retry gave up after 10 attempts");
+            let _ = KillTimer(hwnd, TIMER_TRAY_RETRY);
+        } else if add_icon(hwnd, ctx.hicon) {
+            ctx.added.store(true, Ordering::Relaxed);
+            ctx.adds.fetch_add(1, Ordering::Relaxed);
+            let _ = KillTimer(hwnd, TIMER_TRAY_RETRY);
+            tray_log("tray icon attached by timer retry");
+        }
         return LRESULT(0);
     }
     if ctx.taskbar_msg != 0 && msg == ctx.taskbar_msg {
@@ -433,12 +523,21 @@ impl Tray {
                     hicon,
                     added: AtomicBool::new(false),
                     adds: AtomicU32::new(0),
+                    retries: AtomicU32::new(0),
                 });
                 let ctx_ptr = Box::into_raw(ctx);
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, ctx_ptr as isize);
                 let added = add_icon(hwnd, hicon);
                 (*ctx_ptr).added.store(added, Ordering::Relaxed);
                 (*ctx_ptr).adds.store(1, Ordering::Relaxed);
+                tray_log(&format!(
+                    "startup: hwnd={:?} hicon={:?} added={added}",
+                    hwnd.0, hicon.0
+                ));
+                if !added {
+                    // 立刻失败就先交给定时器补挂
+                    let _ = SetTimer(hwnd, TIMER_TRAY_RETRY, 1200, None);
+                }
                 let _ = ready_tx.send(Ok((hwnd.0 as isize, added)));
 
                 let mut msg = MSG::default();
