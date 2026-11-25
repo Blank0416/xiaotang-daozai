@@ -4,6 +4,14 @@
 每个 **tag = 一版**，对应 Releases 里的一条记录（附该版可执行文件），历史版本可随时回退下载。
 版本号跟随上游（当前 `0.6.66`），用 `alarm-test-N` 后缀区分测试迭代。
 
+## alarm-test-14（验证码复制：有边界的胶囊按钮 + 范围动效）
+
+- alarm-test-12 把热区扩成整块下半卡后范围太大：点主题行、点留白也会复制（用户反馈「明明没点到也判定成点到」）。热区收回成两块——验证码数字行，以及「点击复制」这颗胶囊本身；主题行与卡片留白不再命中。
+- 「点击复制 / 已隐藏 · 点击查看」改成真正的胶囊按钮：常态淡底 + 细描边，悬停时底色与描边渐亮、文字转白，并有一圈淡蓝虚线沿边缘流动、外圈呼吸光晕，把可点范围画出来；按下有即时压感。
+- 复制成功后胶囊转绿、文字变「已复制」并停留约 1.4 秒，配合原有的「验证码已复制」提示。
+- 单测 `mail_page_shows_code_and_copies_on_click` 增加负向断言：点主题行（y≈91）与卡片右侧留白（x=150）不应产生复制命令；录制器新增 `--mail-card` 自检，导出常态 / 悬停 / 已复制三帧对照。
+- 命中框四周仍有 egui `Style.interaction.interact_radius` 默认的 5 个逻辑点外扩（全应用一致，属刻意保留的易点容差），因此数字行下方约 5 点、胶囊上方约 5 点仍可命中；两个热区之间（y≈90–93）是真正的不命中带。
+
 ## alarm-test-13（托盘图标：注册重试 + 诊断日志）
 
 - 根因不在代码：exe 继承了 `D:\桌面\AI项目` 目录的 Low 完整性标签（`Mandatory Label\Low Mandatory Level:(OI)(CI)(NW)`），Windows 以 Low IL 启动，于是 ① 写不了 `%APPDATA%\Daozai`（no-write-up）② 不能给 Medium 的 explorer 发消息（UIPI）→ NIM_ADD / NIM_MODIFY 一律返回 5（ACCESS_DENIED）。给 exe 打 `icacls /setintegritylevel M` 后进程 IL 变 Medium（实测 4096→8192），托盘一次注册成功。

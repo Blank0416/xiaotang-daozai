@@ -3464,7 +3464,17 @@ fn mail_page_shows_code_and_copies_on_click() {
         "点验证码应复制: {:?}",
         h.cmds
     );
+    // 主题行、卡片留白不在热区里：点它们不该再复制（用户反馈范围太大）。
+    // 注意 egui 的 Style.interaction.interact_radius 默认 5，命中框四周会外扩 5 个逻辑点，
+    // 所以这里挑真正离开按钮的空白点，而不是紧贴胶囊边缘的位置。
+    h.cmds.clear();
+    h.click(H::local(80.0, 91.0));
+    assert!(!h.cmds.iter().any(|c| matches!(c, crate::app::Cmd::Copy(_))), "点主题行不应复制: {:?}", h.cmds);
+    h.cmds.clear();
+    h.click(H::local(150.0, 96.0));
+    assert!(!h.cmds.iter().any(|c| matches!(c, crate::app::Cmd::Copy(_))), "点卡片留白不应复制: {:?}", h.cmds);
 }
+
 
 #[test]
 fn mail_row_opens_summary_and_back_returns() {

@@ -867,6 +867,8 @@ pub struct App {
     // 其它
     toast: Option<(String, f64)>,
     toast_below: bool,
+    /// 最近一次复制验证码的大卡（验证码, 时间），用于按钮上短暂的「已复制」反馈
+    pub(crate) mail_code_copied: Option<(String, f64)>,
     last_input: f64,
     system_idle: Option<f64>,
     last_cursor: Option<Pos2>,
@@ -1011,7 +1013,7 @@ impl App {
             listener_status: "尚未连接".into(),
             notification_bell_until: 0.0, notification_bell_at: -10.0, notice: None, hud_notice: None, hud_alpha: 0.0, notice_width:Spring::new(0.0,CLOSE.0,CLOSE.1), notice_details:false, pending_messengers:Vec::new(), messenger_scroll:0.0, alerts: Default::default(), history: Default::default(), pending: vec![],
             todo_first: 0, todo_choosing: false, pet: Default::default(), last_drink: None,
-            toast: None, toast_below: false,
+            toast: None, toast_below: false, mail_code_copied: None,
             last_input: 0.0, system_idle: None,
             last_cursor: None,
             pet_a: 0.0,
@@ -1053,7 +1055,8 @@ impl App {
         self.toast_below = true;
     }
 
-    pub(crate) fn code_copied(&mut self, _code:&str) {
+    pub(crate) fn code_copied(&mut self, code:&str) {
+        self.mail_code_copied = Some((code.to_string(), self.t));
         self.say("验证码已复制");
         self.toast_below = true;
     }
@@ -1095,6 +1098,34 @@ impl App {
     }
 
     /// 收信服务推来的事件；历史邮件静默，新邮件进入通知队列。
+    /// 录制器专用：塞一封带验证码的演示邮件，供离屏自检邮件大卡。
+    #[cfg(feature = "record")]
+    pub fn record_demo_mail_code(&mut self, from: &str, subject: &str, code: &str) {
+        self.mail.accounts = vec![mail::Account {
+            email: "a@qq.com".into(),
+            provider: mail::Provider::Qq,
+            custom: None,
+            enabled: true,
+        }];
+        self.mail_event(mail::Event::Mail {
+            new: true,
+            item: mail::Item {
+                account: "a@qq.com".into(),
+                from: from.into(),
+                subject: subject.into(),
+                time: "09:41".into(),
+                code: Some(code.into()),
+                received_unix: None,
+                summary: format!("Enter {code} to finish signing in.").into(),
+                html: String::new().into(),
+                links: vec![],
+                meeting: None,
+                uid: 42,
+            },
+        });
+        self.settings.mail_code_hide_seconds = 3600;
+    }
+
     pub fn mail_event(&mut self, ev: mail::Event) {
         let watching=|email:&str|self.mail_active() && self.mail.accounts.iter().any(|a|a.enabled && a.email.eq_ignore_ascii_case(email));
         match ev {

@@ -289,6 +289,7 @@ fn main() {
     if std::env::args().any(|a|a=="--alarm-collapsed"){alarm_collapsed_check(false);return;}
     if std::env::args().any(|a|a=="--alarm-stop"){alarm_collapsed_check(true);return;}
 if std::env::args().any(|a|a=="--page"){page_check();return;}
+    if std::env::args().any(|a|a=="--mail-card"){mail_card_check();return;}
     let out_path = std::env::args().nth(1).unwrap_or_else(|| "daozai-demo.mp4".into());
     let (root, drag_file) = setup_data();
 
@@ -611,6 +612,49 @@ fn alarm_check() {
         }
         std::fs::write(format!("{dest}/alarm-{scene}.rgba"), &rgba).unwrap();
         eprintln!("scene {scene} 已导出");
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// 邮件验证码大卡自检：`daozai-record --mail-card <输出目录>`。
+/// 依次导出常态 / 悬停 / 点过之后的帧，用来检查复制胶囊的范围、悬停描边与「已复制」反馈。
+fn mail_card_check() {
+    let (root, _) = setup_data();
+    let dest = std::env::args().nth(2).unwrap_or_else(|| "mail-card".into());
+    std::fs::create_dir_all(&dest).unwrap();
+    let ctx = egui::Context::default();
+    let mut app = App::new(&ctx, Options { fetch_lyrics: false, pet_idle: 45.0 });
+    app.record_demo_mail_code("GitHub", "[GitHub] Please verify your device", "482913");
+    app.show_page(5);
+    // 复制胶囊中心（面板局部坐标 → 窗口逻辑坐标）
+    let btn = Pos2::new((640.0 - daozai::app::PW) / 2.0 + 62.0, 107.0);
+    let mut ras = raster::Raster::new(1280, 380);
+    for frame in 0..96 {
+        let t = frame as f64 / 60.0;
+        let mut events: Vec<egui::Event> = Vec::new();
+        if frame == 30 {
+            events.push(egui::Event::PointerMoved(btn));
+        }
+        if frame == 60 {
+            events.push(egui::Event::PointerButton { pos: btn, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
+        }
+        if frame == 61 {
+            events.push(egui::Event::PointerButton { pos: btn, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
+        }
+        let env = Env { t, clock: "10:28:00".into(), today: "2026-10-28".into(), date: "10月28日 周三".into(), battery: Some(76), charging: true, cursor: None, idle_seconds: Some(0.0), ..Default::default() };
+        let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(640.0, 190.0))), time: Some(t), events, viewports: std::iter::once((egui::ViewportId::ROOT, egui::ViewportInfo { native_pixels_per_point: Some(2.0), ..Default::default() })).collect(), ..Default::default() };
+        let output = ctx.run(raw, |ctx| { egui::CentralPanel::default().frame(egui::Frame::new().fill(Color32::from_rgb(23, 28, 45))).show(ctx, |ui| { let win = ui.max_rect(); app.frame(ui, win, &env); }); });
+        ras.update_textures(&output.textures_delta);
+        let name = match frame { 24 => Some("mail-idle"), 58 => Some("mail-hover"), 66 => Some("mail-copied"), _ => None };
+        if let Some(name) = name {
+            let mut rgba = vec![];
+            ras.buf.fill([0.09, 0.11, 0.18, 1.0]);
+            ras.draw(&ctx.tessellate(output.shapes, output.pixels_per_point), output.pixels_per_point);
+            ras.to_rgba8(&mut rgba);
+            std::fs::write(format!("{dest}/{name}.rgba"), &rgba).unwrap();
+            eprintln!("{name} 已导出 → {dest}/{name}.rgba");
+        }
+        ras.free_textures(&output.textures_delta);
     }
     let _ = std::fs::remove_dir_all(root);
 }

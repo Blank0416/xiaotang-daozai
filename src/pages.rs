@@ -1095,17 +1095,47 @@ impl App {
             let hidden=self.mail_code_hidden(raw);
             let item=self.display_mail(raw);
             let value=item.code.as_deref().unwrap_or("••••••");
+            let copied=self.mail_code_copied.as_ref().is_some_and(|(v,t)| v.as_str()==value&&self.t-*t<1.4);
+            let clock=c.ui.ctx().input(|i| i.time) as f32;
             c.text(46.0,51.0,"验证码",10.5,W::Regular,theme::GRAY,H::Left);
             c.text(166.0,51.0,&c.fit(&item.from,10.5,W::Semibold,78.0),10.5,W::Semibold,theme::WHITE,H::Right);
             let code_size=23.0*(120.0/c.text_w(value,23.0,W::Bold)).min(1.0);
             c.text(46.0,75.0,value,code_size,W::Bold,theme::GREEN,H::Left);
             c.text(46.0,91.0,&c.fit(&item.subject,10.5,W::Regular,120.0),10.5,W::Regular,Color32::from_gray(190),H::Left);
-            c.text(46.0,108.0,if hidden{"已隐藏 · 点击查看"}else{"点击复制"},10.5,W::Regular,theme::DIM,H::Left);
             c.text(166.0,108.0,item.time.rsplit(' ').next().unwrap_or(&item.time),10.0,W::Regular,theme::GRAY,H::Right);
             c.hit(42.0,38.0,128.0,16.0,"mail-code-source").on_hover_text(format!("来自：{}\n{}\n收件邮箱：{}\n{}",item.from,item.subject,item.account,item.time));
-            // 热区覆盖整块下半卡（验证码 + 主题 + 「点击复制」/「已隐藏 · 点击查看」行），
-            // 只圈住数字会让用户点在那行小字上却没有任何反应。
-            if c.hit(40.0,56.0,132.0,62.0,("mail-code",item.uid)).on_hover_text(format!("复制 {} 的验证码",item.from)).clicked(){if hidden{self.reveal_mail_code(raw);}else{cmds.push(Cmd::Copy(value.to_string()));self.code_copied(value);}}
+            // 复制做成一颗边界明确的胶囊：只有它本身和上面的数字行可点，
+            // 主题行、卡片留白不再算点到（上一版整块下半卡都命中，太容易误触）。
+            let label=if hidden{"已隐藏 · 点击查看"}else{"点击复制"};
+            let bw=(c.text_w(label,10.5,W::Regular)+14.0).min(120.0);
+            let (bx,by,bh)=(42.0,98.5,17.0);
+            let btn=c.hit(bx,by,bw,bh,("mail-code-btn",item.uid))
+                .on_hover_text(format!("复制 {} 的验证码",item.from))
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            let (hv,pr)=c.hover_t(&btn);
+            c.fill(bx,by,bw,bh,8.5,Color32::from_white_alpha((8.0+12.0*hv+10.0*pr) as u8));
+            c.stroke(bx,by,bw,bh,8.5,1.0,Color32::from_white_alpha((20.0+36.0*hv+24.0*pr) as u8));
+            if copied {
+                // 复制成功：胶囊转成绿色并短暂显示「已复制」
+                c.fill(bx,by,bw,bh,8.5,paint::alpha(theme::GREEN,0.16));
+                c.stroke(bx,by,bw,bh,8.5,1.0,paint::alpha(theme::GREEN,0.55));
+            }
+            if hv>0.01&&!copied {
+                // 悬停：虚线沿胶囊边缘流动，外加一圈向外呼吸的光晕，把「能点的范围」画出来
+                c.dashed(bx,by,bw,bh,8.5,1.0,paint::alpha(Color32::from_rgb(140,190,255),0.18+0.50*hv),clock*26.0);
+                let breathe=0.5-0.5*(clock*2.2).cos();
+                let pad=1.5+3.0*breathe;
+                c.stroke(bx-pad,by-pad,bw+pad*2.0,bh+pad*2.0,8.5+pad,1.0,paint::alpha(Color32::from_rgb(140,190,255),hv*0.30*(1.0-breathe)));
+            }
+            let shown=if copied{"已复制"}else{label};
+            let tint=if copied{theme::WHITE}else{mix(theme::DIM,theme::WHITE,hv)};
+            c.text(bx+bw*0.5,108.0,shown,10.5,W::Regular,tint,H::Center);
+            let digits=c.hit(42.0,56.0,132.0,28.0,("mail-code",item.uid)).on_hover_text(format!("复制 {} 的验证码",item.from));
+            if digits.clicked()||btn.clicked(){
+                if hidden{self.reveal_mail_code(raw);}
+                else{cmds.push(Cmd::Copy(value.to_string()));self.code_copied(value);}
+            }
+            if copied{c.ui.ctx().request_repaint();}
         }
         use crate::mail_manage::{Action,Folder};
         let folder=self.mail.manage.folder();let trash=folder==Folder::Trash;
