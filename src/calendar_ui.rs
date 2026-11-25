@@ -22,7 +22,7 @@ fn day_mark(date:NaiveDate)->Option<(&'static str,Color32)> {
         Some((lunar::Kind::Work,_))=>return Some(("班",Color32::from_gray(150))),
         None=>{}
     }
-    // 官方安排还没公布的年份（2027 起），按「法定节日」兜底，免得整片假期空白。
+    // 官方安排还没公布的年份（2028 起），按「整段假期」兜底，免得整片假期空白。
     if !lunar::year_covered(date.year()) && lunar::statutory_day(date).is_some(){return Some(("休",theme::RED_TOP));}
     if matches!(lunar::festival_off(date),Some((_,true))){return Some(("休",theme::RED_TOP));}
     None
@@ -42,6 +42,12 @@ fn day_caption(date:NaiveDate)->Option<(String,Option<&'static str>,Color32)> {
     }
     if !lunar::year_covered(date.year()) {
         if let Some(name)=lunar::statutory_day(date){return Some((name.to_string(),Some("放假"),theme::RED_TOP));}
+    }
+    // 官方安排里假期的中间那天并不是节日，也说明一下「这天在放假」。
+    if let Some((lunar::Kind::Rest,name))=lunar::official(date) {
+        if !matches!(lunar::festival_off(date),Some((_,true))) {
+            return Some((name.to_string(),Some("放假"),theme::RED_TOP));
+        }
     }
     if let Some((name,off))=lunar::festival_off(date) {
         let suffix=if off{"放假"}else if is_weekend(date){"逢周末"}else{"不放假"};
@@ -66,7 +72,7 @@ fn day_tooltip(date:NaiveDate)->String {
         if festival.map_or(true,|(festival_name,_)|festival_name!=name){lines.push(format!("节气 · {name}"));}
     }
     if festival.is_none() && !lunar::year_covered(date.year()) {
-        if let Some(name)=lunar::statutory_day(date){lines.push(format!("放假 · {name}（法定假日，调休安排待公布）"));}
+        if let Some(name)=lunar::statutory_day(date){lines.push(format!("放假 · {name}（整段假期估算，调休安排待公布）"));}
     }
     match lunar::official(date) {
         Some((lunar::Kind::Rest,name))=>{if festival.is_none(){lines.push(format!("假期 · {name}"));}}

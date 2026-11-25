@@ -182,7 +182,7 @@ pub fn statutory(name: &str) -> bool {
     matches!(name, "元旦" | "春节" | "除夕" | "清明" | "劳动节" | "端午" | "中秋" | "国庆节")
 }
 
-/// 当年有没有节假日数据（国务院每年才公布一次，表里只覆盖 2024–2026）。
+/// 当年有没有节假日数据（国务院每年才公布一次，表里覆盖 2024–2027）。
 pub fn year_covered(year: i32) -> bool {
     HOLIDAYS.iter().any(|&(from, ..)| from / 10000 == year)
 }
@@ -203,22 +203,34 @@ pub fn festival_off(date: NaiveDate) -> Option<(&'static str, bool)> {
     Some((name, off))
 }
 
-/// 法定节假日当天（不看官方安排，只看《全国年节及纪念日放假办法》）：
-/// 元旦、春节（正月初一至初三）、清明、劳动节、端午、中秋、国庆（10 月 1–3 日）。
-/// 用来给国务院还没公布安排的年份兜底，免得那些假期整片空白。
+/// 国务院还没公布安排的年份：这一天的**整段假期**估算（不只是法定当天），
+/// 免得月历上只标一天、同一次假期里其余日子看起来像普通工作日。
+///
+/// 依据近年惯例：元旦 1/1–1/3、春节 除夕 至 正月初七、清明 节气当天起 3 天、
+/// 劳动节 5/1–5/5、端午 五月初五起 3 天、中秋 八月十五起 3 天、国庆 10/1–10/7。
+/// 只估「哪天大概在放假」；调休上班日要等官方安排公布、重新生成 HOLIDAYS 才知道。
 pub fn statutory_day(date: NaiveDate) -> Option<&'static str> {
     let (month, day) = (date.month(), date.day());
-    if month == 1 && day == 1 { return Some("元旦"); }
-    if month == 10 && (1..=3).contains(&day) { return Some("国庆节"); }
-    if month == 5 && day == 1 { return Some("劳动节"); }
-    if solar_term(date) == Some("清明") { return Some("清明"); }
+    if month == 1 && (1..=3).contains(&day) { return Some("元旦"); }
+    if month == 5 && (1..=5).contains(&day) { return Some("劳动节"); }
+    if month == 10 && (1..=7).contains(&day) { return Some("国庆节"); }
+    // 清明跟着节气走（4 月 4 日或 5 日），从节气当天起连休三天。
+    for back in 0..3 {
+        if let Some(at) = date.checked_sub_days(chrono::Days::new(back)) {
+            if solar_term(at) == Some("清明") { return Some("清明"); }
+        }
+    }
     let lunar = solar_to_lunar(date)?;
     if lunar.leap { return None; }
     match (lunar.month, lunar.day) {
-        (1, 1..=3) => Some("春节"),
-        (5, 5) => Some("端午"),
-        (8, 15) => Some("中秋"),
-        _ => None,
+        (1, 1..=7) => Some("春节"),
+        (5, 5..=7) => Some("端午"),
+        (8, 15..=17) => Some("中秋"),
+        _ => {
+            // 除夕：第二天就是正月初一（腊月只有 29 天时不能用「三十」判）。
+            let next = solar_to_lunar(date.succ_opt()?)?;
+            (next.month == 1 && next.day == 1 && !next.leap).then_some("春节")
+        }
     }
 }
 
@@ -325,7 +337,8 @@ mod tests {
         assert_eq!(festival_off(date(2026, 12, 25)), Some(("圣诞节", false)));
         assert_eq!(festival_off(date(2026, 10, 5)), None, "假期中间那天不是节日");
         assert_eq!(festival_off(date(2024, 2, 9)), Some(("除夕", false)), "2024 的除夕不在法定假期里");
-        assert_eq!(festival_off(date(2027, 10, 1)), Some(("国庆节", true)), "未覆盖年份退回法定节日判断");
+        assert_eq!(festival_off(date(2027, 10, 1)), Some(("国庆节", true)), "2027 已有官方数据");
+        assert_eq!(festival_off(date(2028, 10, 1)), Some(("国庆节", true)), "未覆盖年份退回法定节日判断");
         assert_eq!(festival_off(date(2027, 9, 10)), Some(("教师节", false)));
     }
 
@@ -343,25 +356,48 @@ mod tests {
 
     #[test]
     fn statutory_days_fill_in_years_without_official_data() {
-        // 2027：国务院还没公布安排，按法定假日兜底
-        assert_eq!(statutory_day(date(2027, 1, 1)), Some("元旦"));
-        assert_eq!(statutory_day(date(2027, 10, 1)), Some("国庆节"));
-        assert_eq!(statutory_day(date(2027, 10, 3)), Some("国庆节"), "国庆法定三天");
-        assert_eq!(statutory_day(date(2027, 10, 4)), None);
-        assert_eq!(statutory_day(date(2027, 5, 1)), Some("劳动节"));
-        // 2027 春节：从正月初一数三天
-        let mut spring = vec![];
-        for day in 1..=28 {
-            let at = date(2027, 2, day);
-            let lunar = solar_to_lunar(at).unwrap();
-            if lunar.month == 1 && !lunar.leap { spring.push((lunar.day, statutory_day(at))); }
-        }
-        assert_eq!(spring.iter().find(|(d, _)| *d == 1).unwrap().1, Some("春节"), "正月初一放假");
-        assert_eq!(spring.iter().find(|(d, _)| *d == 3).unwrap().1, Some("春节"), "正月初三也放");
-        assert_eq!(spring.iter().find(|(d, _)| *d == 4).unwrap().1, None, "初四不放");
+        // 2028：国务院还没公布安排，按「整段假期」估算
+        assert_eq!(statutory_day(date(2028, 1, 1)), Some("元旦"));
+        assert_eq!(statutory_day(date(2028, 1, 3)), Some("元旦"), "元旦整段三天");
+        assert_eq!(statutory_day(date(2028, 1, 4)), None);
+        assert_eq!(statutory_day(date(2028, 10, 1)), Some("国庆节"));
+        assert_eq!(statutory_day(date(2028, 10, 7)), Some("国庆节"), "国庆整段七天");
+        assert_eq!(statutory_day(date(2028, 10, 8)), None);
+        assert_eq!(statutory_day(date(2028, 5, 1)), Some("劳动节"));
+        assert_eq!(statutory_day(date(2028, 5, 5)), Some("劳动节"));
+        assert_eq!(statutory_day(date(2028, 5, 6)), None);
+        // 2028 春节：除夕 1/25、正月初一 1/26，一直放到正月初七 2/1
+        assert_eq!(statutory_day(date(2028, 1, 25)), Some("春节"), "除夕也算春节假期");
+        assert_eq!(statutory_day(date(2028, 1, 26)), Some("春节"), "正月初一放假");
+        assert_eq!(statutory_day(date(2028, 2, 1)), Some("春节"), "正月初七也放");
+        assert_eq!(statutory_day(date(2028, 2, 2)), None, "初八不放");
         // 有官方数据的年份，法定当天照旧
         assert_eq!(statutory_day(date(2026, 2, 17)), Some("春节"));
         assert_eq!(statutory_day(date(2026, 9, 10)), None, "教师节不是法定假日");
+    }
+
+    #[test]
+    fn official_2027_schedule_covers_the_whole_break() {
+        assert!(year_covered(2027));
+        for day in 1..=3 {
+            assert_eq!(official(date(2027, 1, day)), Some((Kind::Rest, "元旦")), "元旦 1/1–1/3");
+        }
+        assert_eq!(official(date(2027, 1, 4)), None);
+        for day in 5..=13 {
+            assert_eq!(official(date(2027, 2, day)).map(|(kind, _)| kind), Some(Kind::Rest), "春节 2/5–2/13");
+        }
+        assert_eq!(official(date(2027, 2, 14)), Some((Kind::Work, "调休上班")));
+        assert_eq!(official(date(2027, 1, 31)), Some((Kind::Work, "调休上班")));
+        assert_eq!(makeup_holiday(date(2027, 1, 31)), Some("春节"));
+        assert_eq!(makeup_holiday(date(2027, 9, 26)), Some("国庆节"));
+        assert_eq!(official(date(2027, 4, 3)), Some((Kind::Rest, "清明")));
+        assert_eq!(official(date(2027, 4, 5)), Some((Kind::Rest, "清明")));
+        assert_eq!(official(date(2027, 5, 5)), Some((Kind::Rest, "劳动节")));
+        assert_eq!(official(date(2027, 6, 9)), Some((Kind::Rest, "端午")), "端午只放一天");
+        assert_eq!(official(date(2027, 6, 10)), None);
+        assert_eq!(official(date(2027, 9, 15)), Some((Kind::Rest, "中秋")), "中秋只放一天");
+        assert_eq!(official(date(2027, 10, 7)), Some((Kind::Rest, "国庆节")));
+        assert_eq!(official(date(2027, 10, 9)), Some((Kind::Work, "调休上班")));
     }
 
     #[test]
