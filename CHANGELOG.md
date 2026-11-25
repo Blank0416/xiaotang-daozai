@@ -4,6 +4,14 @@
 每个 **tag = 一版**，对应 Releases 里的一条记录（附该版可执行文件），历史版本可随时回退下载。
 版本号跟随上游（当前 `0.6.66`），用 `alarm-test-N` 后缀区分测试迭代。
 
+## alarm-test-15（验证码复制胶囊：文字真正居中）
+
+- 用户反馈「这个『点击复制』不在动效的中间啊，偏了」。根因：胶囊里的文字用 `text()` 画，而 `text()` 的 y 参数是**基线**不是视觉中心，10.5 号中文字形的可见中心比基线高约 3 个逻辑点，字整体压在胶囊上半部分，下边空出一大块。
+- 改用 `paint::Card::centered_text()`（按 galley 的 `mesh_bounds.center().y` 对齐）：`c.centered_text(bx+bw*0.5, by+bh*0.5, shown, 10.5, W::Regular, tint, H::Center);`。
+- 胶囊几何同时放宽：宽 `text_w+18`（原 +14）、高 18（原 17）、圆角取 `bh*0.5`，左右各留 9 个逻辑点，文字不再贴边。
+- 离屏实测（`daozai-record --mail-card`，1280x380）：悬停帧文字墨迹 325..405 px、胶囊 304..426 px，左右各 21 px（≈10.5 逻辑点）、上下各 12 px；已复制帧「已复制」左右 31/30 px、上下 9/8 px——两轴都对称。
+- 测试：`mail_page_shows_code_and_copies_on_click`、`alphabetic_mail_codes_reach_the_card_without_changing_case` 均 ok；全量 `cargo test --release --lib` = 1302 passed / 5 failed / 129 ignored（失败均为既有环境性/并发 flaky：layered 泄漏、qq 窗口观察、smtc detail_lookup、wechat 两条）。
+
 ## alarm-test-14（验证码复制：有边界的胶囊按钮 + 范围动效）
 
 - alarm-test-12 把热区扩成整块下半卡后范围太大：点主题行、点留白也会复制（用户反馈「明明没点到也判定成点到」）。热区收回成两块——验证码数字行，以及「点击复制」这颗胶囊本身；主题行与卡片留白不再命中。
