@@ -1126,6 +1126,34 @@ impl App {
         self.settings.mail_code_hide_seconds = 3600;
     }
 
+    /// 录制器专用：把邮件整理状态伪造成「已就绪」，让「全部已读 / 标为已读 / 删除 / 恢复」
+    /// 这些只在同步成功后出现的可点态能离屏渲染出来（否则一律是禁用态）。
+    #[cfg(feature = "record")]
+    pub fn record_demo_mail_ready(&mut self) {
+        let Some(account) = self.mail.accounts.first().cloned() else { return };
+        let key = crate::mail::key(&account);
+        let entries: Vec<(u32, bool)> = self.mail.recent.iter().map(|m| (m.uid, false)).collect();
+        self.mail.manage.identities.insert(key.clone(), account);
+        self.mail.manage.data.insert(
+            (key, crate::mail_manage::Folder::Inbox),
+            crate::mail_manage::Snapshot { validity: 1, entries, items: self.mail.recent.clone() },
+        );
+        self.mail.manage.pending.clear();
+        self.mail.manage.auto_read = None;
+        // 否则 mail_manage_tick 会立刻发一次真实的同步请求，pending 一变「就绪态」又没了。
+        self.mail.manage.next_refresh = 1.0e9;
+        self.mail.manage.message = "已同步 3 封邮件".into();
+        self.settings.mail_sync_operations = true;
+        eprintln!(
+            "record_demo_mail_ready: accounts={} recent={} data_keys={} identities={} ready={}",
+            self.mail.accounts.len(),
+            self.mail.recent.len(),
+            self.mail.manage.data.len(),
+            self.mail.manage.identities.len(),
+            self.mail.accounts.first().is_some_and(|a| self.mail_ready(&a.email, crate::mail_manage::Folder::Inbox)),
+        );
+    }
+
     pub fn mail_event(&mut self, ev: mail::Event) {
         let watching=|email:&str|self.mail_active() && self.mail.accounts.iter().any(|a|a.enabled && a.email.eq_ignore_ascii_case(email));
         match ev {
@@ -3135,7 +3163,11 @@ impl App {
             else if self.page==2 {let sv=self.sit_view_t.pos.clamp(0.0,1.0);self.health_tabs(c,31.0,sv);}
             else {c.text(37.0,25.0,"专注设置",size::TITLE,W::Bold,theme::WHITE,H::Left);}
             // 「提醒时段」二级页的返回先回到健康提醒设置，再退出设置。
-            if c.hit(9.0,7.0,28.0,23.0,"subpage-back").clicked(){
+            let sub_back = c.hit(9.0,7.0,28.0,23.0,"subpage-back");
+        let sb_clock = c.ui.ctx().input(|i| i.time) as f32;
+        let (sb_h, _) = c.hover_t(&sub_back);
+        c.hover_frame(sb_h, 11.5, 10.5, 17.0, 17.0, 6.0, sb_clock);
+        if sub_back.clicked(){
                 if self.page==2 && self.health_time {self.health_time=false;} else {self.subpage=None;self.settings_editing=false;}
             }
             self.page_settings(c);self.nav(c);return false;
@@ -3199,6 +3231,10 @@ impl App {
         let r = c.hit(385.0, arrow_y-13.0, 26.0, 26.0, "nav-r");
         let (lh, lp) = c.hover_t(&l);
         let (rh, rp) = c.hover_t(&r);
+        // 翻页箭头在深色底上几乎看不出来，悬停时把「能点的方块」画出来
+        let clock = c.ui.ctx().input(|i| i.time) as f32;
+        c.hover_frame(lh, 9.0, arrow_y - 11.0, 24.0, 22.0, 11.0, clock);
+        c.hover_frame(rh, 386.0, arrow_y - 11.0, 24.0, 22.0, 11.0, clock);
         paint::chevron(c, 21.0, arrow_y, -1.0, lh, lp);
         paint::chevron(c, 398.0, arrow_y, 1.0, rh, rp);
         if l.clicked() { self.navigate_page(false); }

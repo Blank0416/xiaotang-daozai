@@ -376,8 +376,12 @@ impl App {
         c.centered_text(45.0,80.0,"‹",14.0,W::Regular,muted,H::Center);
         c.centered_text(87.0,80.0,&format!("{}年{}月",month.year(),month.month()),9.5,W::Regular,theme::GRAY,H::Center);
         c.centered_text(129.0,80.0,"›",14.0,W::Regular,muted,H::Center);
+        let clock=c.ui.ctx().input(|i| i.time) as f32;
         for (x,next) in [(38.0,false),(122.0,true)] {
-            if c.hit(x,72.0,14.0,16.0,("calendar-month",next)).clicked(){
+            let arrow=c.hit(x,72.0,14.0,16.0,("calendar-month",next)).on_hover_cursor(egui::CursorIcon::PointingHand);
+            let (ah,_)=c.hover_t(&arrow);
+            c.hover_frame(ah,x-1.5,71.0,17.0,18.0,5.0,clock);
+            if arrow.clicked(){
                 let date=if next{month.checked_add_months(chrono::Months::new(1))}else{month.checked_sub_months(chrono::Months::new(1))};
                 if let Some(date)=date{self.select_calendar_day(date);}
             }
