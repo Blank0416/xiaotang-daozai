@@ -435,7 +435,7 @@ impl App {
         let sync_hint=if !self.calendar.view.error.is_empty(){self.calendar.view.error.as_str()}else if !self.calendar.view.warning.is_empty(){self.calendar.view.warning.as_str()}else{"同步这个月份"};
         let can_sync=!self.calendar_configs().is_empty() && !self.calendar.view.loading;
         let sync=c.hit(326.0,33.0,52.0,15.0,"calendar-sync").on_hover_text(sync_hint).on_hover_cursor(egui::CursorIcon::PointingHand);
-        let syhv=if can_sync{c.hover_tip(&sync, 326.0,33.0,52.0,15.0,5.0,c.ui.ctx().input(|i| i.time) as f32)}else{0.0};
+        let syhv=if can_sync{c.hover_tip_ink(&sync, &status, 7.4, W::Regular, 376.0,44.0, H::Right, 6.0,4.5,5.0,c.ui.ctx().input(|i| i.time) as f32)}else{0.0};
         c.text(376.0,44.0,&status,7.4,W::Regular,if can_sync{paint::mix(muted,theme::WHITE,syhv)}else{muted},H::Right);
         if can_sync && sync.clicked(){self.request_calendar_month(true);}
         let focus=self.calendar.view.focus.clone();
@@ -461,7 +461,7 @@ impl App {
                 if button.clicked(){add_local=true;}
                 if self.calendar_configs().is_empty(){
                     let conn=c.hit(290.0,93.0,72.0,20.0,"calendar-connect").on_hover_cursor(egui::CursorIcon::PointingHand);
-                    let chv=c.hover_tip(&conn, 290.0,93.0,72.0,20.0,7.0,c.ui.ctx().input(|i| i.time) as f32);
+                    let chv=c.hover_tip_ctext(&conn, "连接日历", 9.0, W::Regular, 326.0,103.0, H::Center, 9.0,5.5,7.0,c.ui.ctx().input(|i| i.time) as f32);
                     c.centered_text(326.0,103.0,"连接日历",9.0,W::Regular,paint::mix(muted,theme::WHITE,chv),H::Center);
                     if conn.clicked(){connect=true;}
                 }
@@ -469,7 +469,7 @@ impl App {
         }
         if ended_count>0 {
             let tog=c.hit(242.0,34.0,76.0,18.0,"calendar-toggle-ended").on_hover_text("展开/收起已结束的日程").on_hover_cursor(egui::CursorIcon::PointingHand);
-            let toghv=c.hover_tip(&tog, 242.0,34.0,76.0,18.0,6.0,c.ui.ctx().input(|i| i.time) as f32);
+            let toghv=c.hover_tip_ctext(&tog, &format!("{} 已结束 {ended_count}",if show_ended{"-"}else{"+"}), 8.0, W::Regular, 248.0,44.0, H::Left, 6.0,4.5,5.0,c.ui.ctx().input(|i| i.time) as f32);
             c.centered_text(248.0,44.0,&format!("{} 已结束 {ended_count}",if show_ended{"-"}else{"+"}),8.0,W::Regular,paint::mix(muted,theme::WHITE,toghv),H::Left);
             if tog.clicked(){toggle_ended=true;}
         }
@@ -511,13 +511,13 @@ impl App {
             c.centered_text(x+2.0,cy,&c.fit(&event.title,size,W::Semibold,title_right-x-2.0),size,W::Semibold,if has_ended(event,now){muted}else{theme::WHITE},H::Left);
             if is_local {
                 let ed=c.hit(354.0,cy-8.0,23.0,16.0,("calendar-edit-local",event.uid.as_str())).on_hover_cursor(egui::CursorIcon::PointingHand);
-                let edhv=c.hover_tip(&ed, 354.0,cy-8.0,23.0,16.0,5.0,c.ui.ctx().input(|i| i.time) as f32);
+                let edhv=c.hover_tip_ctext(&ed, "编辑", 7.5, W::Regular, 365.0,cy, H::Center, 5.0,3.5,5.0,c.ui.ctx().input(|i| i.time) as f32);
                 c.centered_text(365.0,cy,"编辑",7.5,W::Regular,paint::mix(accent,theme::WHITE,edhv),H::Center);
                 if ed.clicked(){edit_local=Some(event.uid.clone());}
             }
             if can_ignore {
                 let button=c.hit(357.0,cy-8.0,18.0,16.0,("calendar-ignore-mail",entry_key(event))).on_hover_text("忽略此邮件日程；可在邮件详情恢复").on_hover_cursor(egui::CursorIcon::PointingHand);
-                let buttonhv=c.hover_tip(&button, 357.0,cy-8.0,18.0,16.0,5.0,c.ui.ctx().input(|i| i.time) as f32);
+                let buttonhv=c.hover_tip_icon(&button, 366.0,cy, 15.0, 5.0, c.ui.ctx().input(|i| i.time) as f32);
                 paint::close(c,366.0,cy,3.0,if buttonhv > 0.01 {theme::WHITE}else{muted});
                 if button.clicked(){ignored=Some(event.clone());}
             }

@@ -882,10 +882,11 @@ fn btn_hover_check() {
     app.show_page(1);
     let mut ras = raster::Raster::new(1280, 380);
     let mut frame_no = 0usize;
-    let shots: [(usize, &str, f32, f32); 4] = [
+    let shots: [(usize, &str, f32, f32); 5] = [
         (1, "focus-settings", 111.0, 18.0),
         (3, "shelf-add", 330.0, 19.0),
         (6, "quota-refresh", 326.0, 18.0),
+        (7, "calendar-connect", 326.0, 103.0),
         (8, "weather-refresh", 326.0, 18.0),
     ];
     let mut current = 1usize;

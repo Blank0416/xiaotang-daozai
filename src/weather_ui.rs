@@ -939,7 +939,7 @@ impl App {
         let loading = self.weather.loading;
         let ready=self.weather_can_refresh();
         let rf=c.hit(304.0, 8.0, 44.0, 21.0, "weather-refresh").on_hover_text("重新获取天气；自动模式会重新定位。请求间隔至少 30 秒，失败后至少 2 分钟").on_hover_cursor(egui::CursorIcon::PointingHand);
-        let rfhv=if ready { c.hover_tip(&rf, 304.0, 8.0, 44.0, 21.0, 7.0, c.ui.ctx().input(|i| i.time) as f32) } else { 0.0 };
+        let rfhv=if ready { c.hover_tip_ink(&rf, if loading { "更新中" } else { "刷新" }, 10.5, W::Regular, 326.0, 23.0, H::Center, 8.0, 6.0, 7.0, c.ui.ctx().input(|i| i.time) as f32) } else { 0.0 };
         c.text(326.0, 23.0, if loading { "更新中" } else if ready { "刷新" } else { "稍后刷新" }, 10.5, W::Regular, if ready { crate::paint::mix(theme::GRAY, theme::WHITE, rfhv) } else { theme::DIM }, H::Center);
         if rf.clicked() && ready {
             self.weather_refresh();

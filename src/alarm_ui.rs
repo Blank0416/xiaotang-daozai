@@ -177,7 +177,7 @@ impl App {
                 edit = Some(index);
             }
             let remove = c.hit(352.0, y - 9.0, 18.0, 18.0, ("alarm-delete", index)).on_hover_text("删除闹钟").on_hover_cursor(egui::CursorIcon::PointingHand);
-            let rmvhv = c.hover_tip(&remove, 352.0, y - 9.0, 18.0, 18.0, 6.0, c.ui.ctx().input(|i| i.time) as f32);
+            let rmvhv = c.hover_tip_icon(&remove, 361.0, y, 17.0, 6.0, c.ui.ctx().input(|i| i.time) as f32);
             paint::close(c, 361.0, y, 2.4, if rmvhv > 0.01 { theme::WHITE } else { theme::GRAY });
             if remove.clicked() {
                 deleted = Some(index);
@@ -205,7 +205,7 @@ impl App {
         let rest = count.saturating_sub(start + row);
         if rest > 0 {
             let more = c.hit(330.0, 111.0, 42.0, 18.0, "alarm-more").on_hover_text("看后面的闹钟").on_hover_cursor(egui::CursorIcon::PointingHand);
-            let morehv = c.hover_tip(&more, 330.0, 111.0, 42.0, 18.0, 6.0, c.ui.ctx().input(|i| i.time) as f32);
+            let morehv = c.hover_tip_ink(&more, &format!("还有 {rest} 个 ›"), size::TINY, W::Regular, 370.0, 120.0, H::Right, 7.0, 5.0, 7.0, c.ui.ctx().input(|i| i.time) as f32);
             c.text(370.0, 120.0, &format!("还有 {rest} 个 ›"), size::TINY, W::Regular, if morehv > 0.01 { theme::WHITE } else { theme::DIM }, H::Right);
             if more.clicked() {
                 self.alarms.scroll = start + row;
@@ -321,7 +321,7 @@ impl App {
         self.draw_wheel_card(c, "时间", day_hint);
         self.alarm_focus = false;
         let cancel = c.hit(228.0, 100.0, 64.0, 20.0, "alarm-cancel").on_hover_cursor(egui::CursorIcon::PointingHand);
-        let cancelhv = c.hover_tip(&cancel, 228.0, 100.0, 64.0, 20.0, 7.0, c.ui.ctx().input(|i| i.time) as f32);
+        let cancelhv = c.hover_tip_ctext(&cancel, "取消", 10.0, W::Regular, 260.0, 110.0, H::Center, 9.0, 6.0, 7.0, c.ui.ctx().input(|i| i.time) as f32);
         if cancel.clicked() {
             self.alarm_edit = None;
         }
@@ -334,7 +334,7 @@ impl App {
 
         // 右上角：试听 / 删除。
         let preview = c.hit(296.0, 14.0, 44.0, 18.0, "alarm-preview").on_hover_cursor(egui::CursorIcon::PointingHand);
-        let previewhv = c.hover_tip(&preview, 296.0, 14.0, 44.0, 18.0, 6.0, c.ui.ctx().input(|i| i.time) as f32);
+        let previewhv = c.hover_tip_ctext(&preview, "试听", 10.0, W::Regular, 318.0, 26.0, H::Center, 9.0, 5.5, 7.0, c.ui.ctx().input(|i| i.time) as f32);
         if preview.clicked() {
             let path = self.alarms.default_ring().to_string();
             self.alarm_player.start(&path, self.alarms.volume, false);
@@ -342,7 +342,7 @@ impl App {
         c.centered_text(318.0, 26.0, "试听", 10.0, W::Regular, mix(theme::GRAY, theme::WHITE, previewhv), H::Center);
         if let Some(index) = draft.index {
             let del = c.hit(344.0, 14.0, 44.0, 18.0, "alarm-editor-delete").on_hover_cursor(egui::CursorIcon::PointingHand);
-            let delhv = c.hover_tip(&del, 344.0, 14.0, 44.0, 18.0, 6.0, c.ui.ctx().input(|i| i.time) as f32);
+            let delhv = c.hover_tip_ctext(&del, "删除", 10.0, W::Regular, 366.0, 26.0, H::Center, 9.0, 5.5, 7.0, c.ui.ctx().input(|i| i.time) as f32);
             if del.clicked() {
                 self.alarms.remove(index);
                 self.alarm_edit = None;

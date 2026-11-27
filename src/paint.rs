@@ -286,6 +286,44 @@ impl<'a> Card<'a> {
         self.fill(x, y, w, h, r, alpha(theme::BTN_HOVER, 0.95 * hv.clamp(0.0, 1.0)));
     }
 
+    /// 文字的真实墨迹框（左上角 + 宽高）。参数与 `text()` 完全一致：x 按 align 摆、base 是基线。
+    /// 悬停框以它为准就不会出现「框比字偏左/偏大」的错位。
+    pub fn ink_box(&self, t: &str, size: f32, w: W, x: f32, base: f32, align: H, pad_x: f32, pad_y: f32) -> (f32, f32, f32, f32) {
+        let (start, row_top, b) = self.ink_parts(t, size, w, x, base, align);
+        (start + b.left() - pad_x, row_top + b.top() - pad_y, b.width() + pad_x * 2.0, b.height() + pad_y * 2.0)
+    }
+    /// 同上，但对齐 `centered_text`（垂直给的是墨迹中心）。
+    pub fn ink_box_c(&self, t: &str, size: f32, w: W, x: f32, cy: f32, align: H, pad_x: f32, pad_y: f32) -> (f32, f32, f32, f32) {
+        let (start, _row_top, b) = self.ink_parts(t, size, w, x, 0.0, align);
+        (start + b.left() - pad_x, cy - b.height() * 0.5 - pad_y, b.width() + pad_x * 2.0, b.height() + pad_y * 2.0)
+    }
+    /// (字排起点 x, 字排顶部 y, 墨迹框相对于字排原点)——全部换回逻辑坐标。
+    fn ink_parts(&self, t: &str, size: f32, w: W, x: f32, base: f32, align: H) -> (f32, f32, egui::Rect) {
+        let g = self.galley(t, size, w, Color32::WHITE);
+        let s = if self.s > 0.001 { self.s } else { 1.0 };
+        let gw = g.size().x / s;
+        let asc = g.rows.first().and_then(|r| r.glyphs.first()).map(|gl| gl.pos.y).unwrap_or(size * s) / s;
+        let start = match align { H::Left => x, H::Center => x - gw * 0.5, H::Right => x - gw };
+        let b = g.mesh_bounds;
+        (start, base - asc, egui::Rect::from_min_size(egui::pos2(b.left() / s, b.top() / s), egui::vec2(b.width() / s, b.height() / s)))
+    }
+    /// 按文字墨迹画悬停框：参数与 `text()` 一致，框正好套住字并留 pad。
+    pub fn hover_tip_ink(&self, r: &Response, t: &str, size: f32, w: W, x: f32, base: f32, align: H, pad_x: f32, pad_y: f32, radius: f32, clock: f32) -> f32 {
+        if t.is_empty() { return 0.0; }
+        let a = self.ink_box(t, size, w, x, base, align, pad_x, pad_y);
+        self.hover_tip(r, a.0, a.1, a.2, a.3, radius, clock)
+    }
+    /// 按文字墨迹画悬停框（`centered_text` 版）。
+    pub fn hover_tip_ctext(&self, r: &Response, t: &str, size: f32, w: W, x: f32, cy: f32, align: H, pad_x: f32, pad_y: f32, radius: f32, clock: f32) -> f32 {
+        if t.is_empty() { return 0.0; }
+        let a = self.ink_box_c(t, size, w, x, cy, align, pad_x, pad_y);
+        self.hover_tip(r, a.0, a.1, a.2, a.3, radius, clock)
+    }
+    /// 图标按钮的悬停框：以图标中心为准画一个 size×size 的方块。
+    pub fn hover_tip_icon(&self, r: &Response, cx: f32, cy: f32, size: f32, radius: f32, clock: f32) -> f32 {
+        self.hover_tip(r, cx - size * 0.5, cy - size * 0.5, size, size, radius, clock)
+    }
+
     /// `hover_frame` 的便捷版：给一个交互区，返回平滑后的悬停量（0..1），供文字/图标提亮。
     pub fn hover_tip(&self, r: &Response, x: f32, y: f32, w: f32, h: f32, radius: f32, clock: f32) -> f32 {
         let (hv, pv) = self.hover_t(r);
