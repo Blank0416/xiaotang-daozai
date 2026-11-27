@@ -5,7 +5,7 @@
 use crate::alarm::{Alarm, Draft, Ringing, SNOOZE_MAX, SNOOZE_MIN};
 use crate::app::{App, Cmd, Env, ALARM_PAGE};
 use crate::extras::{island_switch, setting_button};
-use crate::paint::{self, capsule, Card, H};
+use crate::paint::{self, capsule, mix, Card, H};
 use crate::theme::{self, size, W};
 use eframe::egui::{self, Color32, Pos2, Rect};
 
@@ -176,8 +176,9 @@ impl App {
             if r.clicked() {
                 edit = Some(index);
             }
-            let remove = c.hit(352.0, y - 9.0, 18.0, 18.0, ("alarm-delete", index)).on_hover_text("删除闹钟");
-            paint::close(c, 361.0, y, 2.4, if remove.hovered() { theme::WHITE } else { theme::GRAY });
+            let remove = c.hit(352.0, y - 9.0, 18.0, 18.0, ("alarm-delete", index)).on_hover_text("删除闹钟").on_hover_cursor(egui::CursorIcon::PointingHand);
+            let rmvhv = c.hover_tip(&remove, 352.0, y - 9.0, 18.0, 18.0, 6.0, c.ui.ctx().input(|i| i.time) as f32);
+            paint::close(c, 361.0, y, 2.4, if rmvhv > 0.01 { theme::WHITE } else { theme::GRAY });
             if remove.clicked() {
                 deleted = Some(index);
             }
@@ -203,8 +204,9 @@ impl App {
         }
         let rest = count.saturating_sub(start + row);
         if rest > 0 {
-            let more = c.hit(330.0, 111.0, 42.0, 18.0, "alarm-more").on_hover_text("看后面的闹钟");
-            c.text(370.0, 120.0, &format!("还有 {rest} 个 ›"), size::TINY, W::Regular, if more.hovered() { theme::WHITE } else { theme::DIM }, H::Right);
+            let more = c.hit(330.0, 111.0, 42.0, 18.0, "alarm-more").on_hover_text("看后面的闹钟").on_hover_cursor(egui::CursorIcon::PointingHand);
+            let morehv = c.hover_tip(&more, 330.0, 111.0, 42.0, 18.0, 6.0, c.ui.ctx().input(|i| i.time) as f32);
+            c.text(370.0, 120.0, &format!("还有 {rest} 个 ›"), size::TINY, W::Regular, if morehv > 0.01 { theme::WHITE } else { theme::DIM }, H::Right);
             if more.clicked() {
                 self.alarms.scroll = start + row;
                 if self.alarms.scroll >= count {
@@ -318,10 +320,12 @@ impl App {
         };
         self.draw_wheel_card(c, "时间", day_hint);
         self.alarm_focus = false;
-        if c.hit(228.0, 100.0, 64.0, 20.0, "alarm-cancel").clicked() {
+        let cancel = c.hit(228.0, 100.0, 64.0, 20.0, "alarm-cancel").on_hover_cursor(egui::CursorIcon::PointingHand);
+        let cancelhv = c.hover_tip(&cancel, 228.0, 100.0, 64.0, 20.0, 7.0, c.ui.ctx().input(|i| i.time) as f32);
+        if cancel.clicked() {
             self.alarm_edit = None;
         }
-        c.centered_text(260.0, 110.0, "取消", 10.0, W::Regular, theme::GRAY, H::Center);
+        c.centered_text(260.0, 110.0, "取消", 10.0, W::Regular, mix(theme::GRAY, theme::WHITE, cancelhv), H::Center);
         let (save, b) = capsule(c, 302.0, 100.0, 66.0, 20.0, "alarm-save", Color32::from_rgb(10, 132, 255), Color32::from_rgb(35, 150, 255));
         b.centered_text(335.0, 110.0, "完成", 10.0, W::Semibold, theme::WHITE, H::Center);
         if save.clicked() {
@@ -329,19 +333,23 @@ impl App {
         }
 
         // 右上角：试听 / 删除。
-        if c.hit(296.0, 14.0, 44.0, 18.0, "alarm-preview").clicked() {
+        let preview = c.hit(296.0, 14.0, 44.0, 18.0, "alarm-preview").on_hover_cursor(egui::CursorIcon::PointingHand);
+        let previewhv = c.hover_tip(&preview, 296.0, 14.0, 44.0, 18.0, 6.0, c.ui.ctx().input(|i| i.time) as f32);
+        if preview.clicked() {
             let path = self.alarms.default_ring().to_string();
             self.alarm_player.start(&path, self.alarms.volume, false);
         }
-        c.centered_text(318.0, 26.0, "试听", 10.0, W::Regular, theme::GRAY, H::Center);
+        c.centered_text(318.0, 26.0, "试听", 10.0, W::Regular, mix(theme::GRAY, theme::WHITE, previewhv), H::Center);
         if let Some(index) = draft.index {
-            if c.hit(344.0, 14.0, 44.0, 18.0, "alarm-editor-delete").clicked() {
+            let del = c.hit(344.0, 14.0, 44.0, 18.0, "alarm-editor-delete").on_hover_cursor(egui::CursorIcon::PointingHand);
+            let delhv = c.hover_tip(&del, 344.0, 14.0, 44.0, 18.0, 6.0, c.ui.ctx().input(|i| i.time) as f32);
+            if del.clicked() {
                 self.alarms.remove(index);
                 self.alarm_edit = None;
                 self.say("闹钟已删除");
                 return;
             }
-            c.centered_text(366.0, 26.0, "删除", 10.0, W::Regular, theme::GRAY, H::Center);
+            c.centered_text(366.0, 26.0, "删除", 10.0, W::Regular, mix(theme::RED, theme::WHITE, delhv * 0.65), H::Center);
         }
     }
 

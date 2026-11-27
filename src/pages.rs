@@ -266,8 +266,10 @@ impl App {
 
     // ================= 专注（番茄钟） =================
     pub(crate) fn page_focus(&mut self, c: &Card, _env: &Env) {
-        if c.hit(90.0,8.0,42.0,21.0,"focus-settings").on_hover_text("专注设置").clicked(){self.open_settings_category(2);}
-        c.text(111.0,23.0,"设置",10.5,W::Regular,theme::GRAY,H::Center);
+        let fs=c.hit(90.0,8.0,42.0,21.0,"focus-settings").on_hover_text("专注设置").on_hover_cursor(egui::CursorIcon::PointingHand);
+        let fshv=c.hover_tip(&fs,90.0,8.0,42.0,21.0,7.0,c.ui.ctx().input(|i| i.time) as f32);
+        if fs.clicked(){self.open_settings_category(2);}
+        c.text(111.0,23.0,"设置",10.5,W::Regular,mix(theme::GRAY,theme::WHITE,fshv),H::Center);
         let (rx, ry, rr) = (79.0, 74.0, 32.0);
         let frac = self.ring_shown.pos.clamp(0.0, 1.0);
         let run = c.ui.ctx().animate_bool_with_time(egui::Id::new("pomo-run"), self.pomo.running, 0.3);
@@ -470,8 +472,10 @@ impl App {
         dc.text(65.0, 114.0, "喝一口", size::BODY, W::Semibold, Color32::from_rgb(220, 236, 255), H::Left);
         if d.clicked() { self.drink_water(); }
         if self.last_drink.is_some() {
-            c.text(191.0,114.0,"撤销",10.5,W::Regular,theme::GRAY,H::Center);
-            if c.hit(177.0,98.0,28.0,25.0,"water-undo").on_hover_text("撤销最近一次饮水记录").clicked() {
+            let undo=c.hit(177.0,98.0,28.0,25.0,"water-undo").on_hover_text("撤销最近一次饮水记录").on_hover_cursor(egui::CursorIcon::PointingHand);
+            let uhv=c.hover_tip(&undo,178.0,99.0,26.0,23.0,6.0,c.ui.ctx().input(|i| i.time) as f32);
+            c.text(191.0,114.0,"撤销",10.5,W::Regular,mix(theme::GRAY,theme::WHITE,uhv),H::Center);
+            if undo.clicked() {
                 if let Some((ml,hour))=self.last_drink.take() {
                     self.water.drunk_ml=self.water.drunk_ml.saturating_sub(ml);
                     self.water.hours[hour]=self.water.hours[hour].saturating_sub(ml);
@@ -663,8 +667,10 @@ impl App {
             self.page_clipboard(c, env, cmds);
             return;
         }
-        c.text(344.0,23.0,"添加",size::SMALL,W::Regular,theme::GRAY,H::Right);
-        if c.hit(311.0,8.0,38.0,22.0,"shelf-add").on_hover_text("从电脑选择文件").clicked(){cmds.push(Cmd::AddFiles);}
+        let add_file=c.hit(311.0,8.0,38.0,22.0,"shelf-add").on_hover_text("从电脑选择文件").on_hover_cursor(egui::CursorIcon::PointingHand);
+        let afhv=c.hover_tip(&add_file,311.0,8.0,38.0,22.0,7.0,c.ui.ctx().input(|i| i.time) as f32);
+        c.text(344.0,23.0,"添加",size::SMALL,W::Regular,mix(theme::GRAY,theme::WHITE,afhv),H::Right);
+        if add_file.clicked(){cmds.push(Cmd::AddFiles);}
         if n>5 {c.text(209.5,121.0,&format!("{}–{} / {n} · 滚轮查看",self.shelf_first+1,(self.shelf_first+5).min(n)),10.5,W::Regular,theme::DIM,H::Center);}
 
         if n > 0 {
@@ -761,8 +767,9 @@ impl App {
             cc.text(x, 99.0, &meta, size::TINY, W::Regular, theme::GRAY, H::Center);
             if r.drag_started() && p.exists() {cmds.push(Cmd::DragFile(p.clone()));}
             let remove=row.hit(x+15.0,30.0,17.0,18.0,("shelf-remove",p));
+            let rhv=row.hover_tip(&remove, x+14.5,29.5,18.0,19.0,6.0,c.ui.ctx().input(|i| i.time) as f32);
             let remove_card=row.faded(a);
-            remove_card.circle(x+23.5,39.0,7.5,Color32::from_rgb(55,40,46));
+            remove_card.circle(x+23.5,39.0,7.5,mix(Color32::from_rgb(55,40,46),theme::RED,rhv*0.75));
             paint::close(&remove_card,x+23.5,39.0,2.4,theme::WHITE);
             let mut delete=remove.clicked();
             if show_hint {remove.on_hover_text("从置物架移除，保留原文件");}
@@ -854,9 +861,11 @@ impl App {
             let tip: String = clip.text.chars().take(400).collect();
             let r = r.on_hover_text(format!("{tip}{}\n点击复制", if clip.text.chars().count() > 400 { "…" } else { "" }));
             let pin = c.hit(323.0, y - 9.0, 18.0, 18.0, ("clip-pin", index)).on_hover_text(if clip.pinned { "取消固定" } else { "固定（清空时保留）" });
-            paint::pin(c, 332.0, y, 9.0, if clip.pinned || pin.hovered() { theme::BLUE } else { theme::GRAY });
+            let phv=c.hover_tip(&pin, 323.0,y-9.0,18.0,18.0,6.0,c.ui.ctx().input(|i| i.time) as f32);
+            paint::pin(c, 332.0, y, 9.0, if clip.pinned || phv > 0.01 { theme::BLUE } else { theme::GRAY });
             let delete = c.hit(345.0, y - 9.0, 17.0, 18.0, ("clip-delete", index)).on_hover_text("删除这条记录");
-            paint::close(c, 353.5, y, 2.4, theme::GRAY);
+            let dhv=c.hover_tip(&delete, 345.0,y-9.0,17.0,18.0,6.0,c.ui.ctx().input(|i| i.time) as f32);
+            paint::close(c, 353.5, y, 2.4, if dhv > 0.01 { theme::WHITE } else { theme::GRAY });
             if delete.clicked() { action = Some((index, 2)); }
             else if pin.clicked() { action = Some((index, 1)); }
             else if r.clicked() { action = Some((index, 0)); }
@@ -991,11 +1000,14 @@ impl App {
                     if r.clicked(){self.todo_choosing=false;self.editing=Some(i);self.adding=false;self.buf=item.text.clone();self.todo_input_focused=false;break;}
                     row+=1;shown+=1;continue;
                 }
-                let delete=c.hit(353.0,y-9.0,17.0,18.0,("todo-delete",i)).on_hover_text("删除待办").clicked();
-                paint::close(c,361.5,y,2.4,theme::GRAY);
-                let reminder=c.hit(333.0,y-9.0,18.0,18.0,("todo-reminder",i)).on_hover_text(item.reminder_text().map(|due|format!("提醒：{due} · 点击修改")).unwrap_or_else(||"设置提醒与每周重复（可选）".into()));
+                let delete_hit=c.hit(353.0,y-9.0,17.0,18.0,("todo-delete",i)).on_hover_text("删除待办").on_hover_cursor(egui::CursorIcon::PointingHand);
+                let tdhv=c.hover_tip(&delete_hit, 353.0,y-9.0,17.0,18.0,6.0,c.ui.ctx().input(|i| i.time) as f32);
+                let delete=delete_hit.clicked();
+                paint::close(c,361.5,y,2.4,if tdhv > 0.01 { theme::WHITE } else { theme::GRAY });
+                let reminder=c.hit(333.0,y-9.0,18.0,18.0,("todo-reminder",i)).on_hover_text(item.reminder_text().map(|due|format!("提醒：{due} · 点击修改")).unwrap_or_else(||"设置提醒与每周重复（可选）".into())).on_hover_cursor(egui::CursorIcon::PointingHand);
+                let trhv=c.hover_tip(&reminder, 333.0,y-9.0,18.0,18.0,6.0,c.ui.ctx().input(|i| i.time) as f32);
                 let reminder_clicked=reminder.clicked();
-                let ink=if item.due.is_some()||reminder.hovered(){theme::BLUE}else{theme::GRAY};
+                let ink=if item.due.is_some()||trhv>0.01{theme::BLUE}else{theme::GRAY};
                 c.ring(342.0,y,4.7,1.1,ink);
                 c.path(&[(342.0,y-2.5),(342.0,y),(344.3,y+1.0)],1.1,ink);
                 if reminder_clicked {self.open_task_reminder(i);}
@@ -1114,19 +1126,15 @@ impl App {
                 .on_hover_text(format!("复制 {} 的验证码",item.from))
                 .on_hover_cursor(egui::CursorIcon::PointingHand);
             let (hv,pr)=c.hover_t(&btn);
-            c.fill(bx,by,bw,bh,br,Color32::from_white_alpha((8.0+12.0*hv+10.0*pr) as u8));
-            c.stroke(bx,by,bw,bh,br,1.0,Color32::from_white_alpha((20.0+36.0*hv+24.0*pr) as u8));
             if copied {
                 // 复制成功：胶囊转成绿色并短暂显示「已复制」
                 c.fill(bx,by,bw,bh,br,paint::alpha(theme::GREEN,0.16));
                 c.stroke(bx,by,bw,bh,br,1.0,paint::alpha(theme::GREEN,0.55));
-            }
-            if hv>0.01&&!copied {
-                // 悬停：虚线沿胶囊边缘流动，外加一圈向外呼吸的光晕，把「能点的范围」画出来
-                c.dashed(bx,by,bw,bh,br,1.0,paint::alpha(Color32::from_rgb(140,190,255),0.18+0.50*hv),clock*26.0);
-                let breathe=0.5-0.5*(clock*2.2).cos();
-                let pad=1.5+3.0*breathe;
-                c.stroke(bx-pad,by-pad,bw+pad*2.0,bh+pad*2.0,br+pad,1.0,paint::alpha(Color32::from_rgb(140,190,255),hv*0.30*(1.0-breathe)));
+            } else {
+                // 和「加一个 / 倒计时」一致：悬停淡入按钮底色，按下再压暗一层。
+                c.fill(bx,by,bw,bh,br,Color32::from_white_alpha(10));
+                c.hover_frame(hv,bx,by,bw,bh,br,clock);
+                if pr>0.01 { c.fill(bx,by,bw,bh,br,paint::alpha(Color32::BLACK,0.28*pr)); }
             }
             let shown=if copied{"已复制"}else{label};
             let tint=if copied{theme::WHITE}else{mix(theme::DIM,theme::WHITE,hv)};
@@ -1318,14 +1326,18 @@ impl App {
         let y = 214.0;
         if hidden {
             c.text(46.0,y,"验证码已隐藏（不代表失效）",11.0,W::Regular,theme::GRAY,H::Left);
-            c.text(374.0,y,"查看 15 秒",10.5,W::Regular,theme::BLUE,H::Right);
-            if c.hit(290.0,y-14.0,86.0,24.0,("mail-reveal",item.uid)).clicked(){self.reveal_mail_code(raw);}
+            let reveal=c.hit(290.0,y-14.0,86.0,24.0,("mail-reveal",item.uid)).on_hover_cursor(egui::CursorIcon::PointingHand);
+            let rvhv=c.hover_tip(&reveal, 291.0,y-13.0,84.0,22.0,6.0,c.ui.ctx().input(|i| i.time) as f32);
+            c.text(374.0,y,"查看 15 秒",10.5,W::Regular,mix(theme::BLUE,theme::WHITE,rvhv),H::Right);
+            if reveal.clicked(){self.reveal_mail_code(raw);}
         } else if let Some(m) = &item.meeting {
             let ignored=self.mail_event_ignored(m);
             c.text(46.0,y,&format!("{} · {}",if ignored{"已忽略"}else{"日程"},m.at),10.5,W::Regular,if ignored{theme::DIM}else{theme::GREEN},H::Left);
             let label=if ignored{"恢复日程"}else{"忽略日程"};
-            c.text(374.0,y,label,10.5,W::Regular,theme::GRAY,H::Right);
-            if c.hit(316.0,y-14.0,60.0,24.0,("mail-ignore-event",item.uid)).on_hover_text(&m.title).clicked(){self.toggle_mail_event(m);}
+            let ign=c.hit(316.0,y-14.0,60.0,24.0,("mail-ignore-event",item.uid)).on_hover_text(&m.title).on_hover_cursor(egui::CursorIcon::PointingHand);
+            let ihv=c.hover_tip(&ign, 317.0,y-13.0,58.0,22.0,6.0,c.ui.ctx().input(|i| i.time) as f32);
+            c.text(374.0,y,label,10.5,W::Regular,mix(theme::GRAY,theme::WHITE,ihv),H::Right);
+            if ign.clicked(){self.toggle_mail_event(m);}
         } else if let Some(code) = &item.code {
             let label = format!("验证码 {code}");
             let w = c.text(46.0, y, &label, 13.0, W::Semibold, theme::GREEN, H::Left);

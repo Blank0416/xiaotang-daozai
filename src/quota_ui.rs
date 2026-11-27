@@ -1,5 +1,5 @@
 //! 同心额度环、账号选择及账号设置。
-use crate::{app::{App,Cmd},extras::{settings_control_row},paint::{Card,H},quota::{self,Accent,Account,Amount,Config,Provider,Snapshot},theme::{self,W}};
+use crate::{app::{App,Cmd},extras::{settings_control_row},paint::{mix,Card,H},quota::{self,Accent,Account,Amount,Config,Provider,Snapshot},theme::{self,W}};
 use eframe::egui::{self,Color32};
 use std::collections::{HashMap,HashSet};
 use chrono::Datelike;
@@ -409,8 +409,12 @@ impl App {
         if let Some(id)=chosen{self.quota.config.selected=id;self.quota.config.save();self.show_page(6);}
     }
     pub(crate) fn page_quota(&mut self,c:&Card){
-        if c.hit(303.0,8.0,32.0,21.0,"quota-refresh").on_hover_text("刷新额度").clicked(){self.pending.push(Cmd::QuotaRefresh);}
-        c.text(319.0,23.0,if self.quota.busy.is_empty(){"刷新"}else{"更新中"},10.5,W::Regular,theme::GRAY,H::Center);
+        let clock=c.ui.ctx().input(|i| i.time) as f32;
+        let ready=self.quota.busy.is_empty();
+        let rf=c.hit(303.0,8.0,32.0,21.0,"quota-refresh").on_hover_text("刷新额度").on_hover_cursor(egui::CursorIcon::PointingHand);
+        let rhv=if ready{c.hover_tip(&rf,303.0,8.0,32.0,21.0,7.0,clock)}else{0.0};
+        if rf.clicked(){self.pending.push(Cmd::QuotaRefresh);}
+        c.text(319.0,23.0,if ready{"刷新"}else{"更新中"},10.5,W::Regular,if ready{mix(theme::GRAY,theme::WHITE,rhv)}else{theme::GRAY},H::Center);
         let Some(selected)=self.quota.config.selected_index() else{
             c.text(43.0,61.0,"还没有添加 AI 账号",13.0,W::Bold,theme::WHITE,H::Left);
             c.text(43.0,80.0,"连接 AI 账号，查看剩余额度",10.5,W::Regular,theme::GRAY,H::Left);
@@ -418,7 +422,7 @@ impl App {
         };
         let indices=self.quota.config.ordered_indices(false);
         let pos=indices.iter().position(|i|*i==selected).unwrap_or(0);let start=pos/3*3;let mut picked=None;
-        if indices.len()>3{for (x,offset,label)in [(42.0,-1isize,"‹"),(357.0,1,"›")]{if c.hit(x-7.0,30.0,18.0,19.0,("quota-account-next",offset)).clicked(){picked=Some(indices[(pos as isize+offset).rem_euclid(indices.len() as isize) as usize]);}c.text(x+2.0,44.0,label,13.0,W::Regular,theme::GRAY,H::Center);}}
+        if indices.len()>3{for (x,offset,label)in [(42.0,-1isize,"‹"),(357.0,1,"›")]{let arrow=c.hit(x-7.0,30.0,18.0,19.0,("quota-account-next",offset)).on_hover_cursor(egui::CursorIcon::PointingHand);let ahv=c.hover_tip(&arrow,x-6.5,30.5,17.0,18.0,6.0,clock);if arrow.clicked(){picked=Some(indices[(pos as isize+offset).rem_euclid(indices.len() as isize) as usize]);}c.text(x+2.0,44.0,label,13.0,W::Regular,mix(theme::GRAY,theme::WHITE,ahv),H::Center);}}
         for (column,index)in indices.iter().skip(start).take(3).enumerate(){let a=&self.quota.config.accounts[*index];let x=59.0+column as f32*99.0;let on=*index==selected;let colors=accent_colors(&self.quota.config,a);let color=colors[0];let(r,b)=crate::paint::capsule(c,x,30.0,94.0,21.0,&format!("quota-account-{}",a.id),if on{Color32::from_rgb(color.r()/5,color.g()/5,color.b()/5)}else{Color32::BLACK},theme::BTN_HOVER);let text=b.fit(&a.alias,10.5,W::Regular,84.0);b.text(x+47.0,45.0,&text,10.5,W::Regular,if on{colors[1]}else{theme::GRAY},H::Center);if r.on_hover_text(format!("{} · {}",a.provider.name(),a.alias)).clicked(){picked=Some(*index);}}
         if let Some(i)=picked{self.quota.config.selected=self.quota.config.accounts[i].id.clone();self.quota.config.save();}
         let a=&self.quota.config.accounts[selected];let result=self.quota.rows.get(&a.id);let snapshot=result.and_then(|r|r.as_ref().ok());
@@ -481,10 +485,12 @@ impl App {
                     c.text(125.0,109.0,q.unavailable_text(),18.0,W::Semibold,theme::WHITE,H::Left);
                     c.text(125.0,132.0,if a.provider==Provider::NewApi{"请检查查询模板或账户查询权限"}else{"请到站点查看账户余额或套餐"},10.5,W::Regular,theme::GRAY,H::Left);
                 }
-                if c.hit(310.0,60.0,47.0,22.0,("relay-details",&a.id)).on_hover_text("查看全部周期与额度").clicked(){
+                let det=c.hit(310.0,60.0,47.0,22.0,("relay-details",&a.id)).on_hover_text("查看全部周期与额度").on_hover_cursor(egui::CursorIcon::PointingHand);
+                let dhv=c.hover_tip(&det,310.0,60.0,47.0,22.0,7.0,c.ui.ctx().input(|i| i.time) as f32);
+                if det.clicked(){
                     self.quota.detail_account=Some(a.id.clone());self.settings_tab=11;self.open_settings();
                 }
-                c.text(355.0,77.0,"明细 ›",10.0,W::Regular,theme::GRAY,H::Right);
+                c.text(355.0,77.0,"明细 ›",10.0,W::Regular,mix(theme::GRAY,theme::WHITE,dhv),H::Right);
             }else{
                 let text=result.and_then(|r|r.as_ref().err()).map(String::as_str).unwrap_or("等待更新额度");
                 for(i,line)in c.wrap(text,11.0,W::Regular,226.0,3).iter().enumerate(){c.text(125.0,99.0+i as f32*17.0,line,11.0,W::Regular,theme::GRAY,H::Left);}

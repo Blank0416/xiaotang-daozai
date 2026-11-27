@@ -292,6 +292,7 @@ if std::env::args().any(|a|a=="--page"){page_check();return;}
     if std::env::args().any(|a|a=="--mail-card"){mail_card_check();return;}
     if std::env::args().any(|a|a=="--mail-hover"){mail_hover_check();return;}
     if std::env::args().any(|a|a=="--hover-nav"){nav_hover_check();return;}
+    if std::env::args().any(|a|a=="--hover-btn"){btn_hover_check();return;}
     let out_path = std::env::args().nth(1).unwrap_or_else(|| "daozai-demo.mp4".into());
     let (root, drag_file) = setup_data();
 
@@ -868,4 +869,62 @@ fn gallery() {
     }
     // 仅移除本次创建的独立演示目录。
     let _=std::fs::remove_dir_all(root);
+}
+
+/// 通用按钮悬停自检：`daozai-record --hover-btn <输出目录>`。
+/// 覆盖专注设置、置物架「添加」、AI 额度「刷新」、天气「刷新」等纯文字按钮。
+fn btn_hover_check() {
+    let (root, _) = setup_data();
+    let dest = std::env::args().nth(2).unwrap_or_else(|| "hover-btn".into());
+    std::fs::create_dir_all(&dest).unwrap();
+    let ctx = egui::Context::default();
+    let mut app = App::new(&ctx, Options { fetch_lyrics: false, pet_idle: 45.0 });
+    app.show_page(1);
+    let mut ras = raster::Raster::new(1280, 380);
+    let mut frame_no = 0usize;
+    let shots: [(usize, &str, f32, f32); 4] = [
+        (1, "focus-settings", 111.0, 18.0),
+        (3, "shelf-add", 330.0, 19.0),
+        (6, "quota-refresh", 326.0, 18.0),
+        (8, "weather-refresh", 326.0, 18.0),
+    ];
+    let mut current = 1usize;
+    for (page, name, x, y) in shots {
+        if page != current {
+            app.show_page(page);
+            current = page;
+            for _ in 0..40 {
+                let t = frame_no as f64 / 60.0;
+                let env = Env { t, clock: "10:28:00".into(), today: "2026-10-28".into(), date: "10月28日 周三".into(), battery: Some(76), charging: true, cursor: None, idle_seconds: Some(0.0), ..Default::default() };
+                let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(640.0, 190.0))), time: Some(t), viewports: std::iter::once((egui::ViewportId::ROOT, egui::ViewportInfo { native_pixels_per_point: Some(2.0), ..Default::default() })).collect(), ..Default::default() };
+                let output = ctx.run(raw, |ctx| { egui::CentralPanel::default().frame(egui::Frame::new().fill(Color32::from_rgb(23, 28, 45))).show(ctx, |ui| { let win = ui.max_rect(); app.frame(ui, win, &env); }); });
+                ras.update_textures(&output.textures_delta);
+                ras.free_textures(&output.textures_delta);
+                frame_no += 1;
+            }
+        }
+        let target = Pos2::new((640.0 - daozai::app::PW) / 2.0 + x, y);
+        for i in 0..40 {
+            let t = frame_no as f64 / 60.0;
+            let mut events: Vec<egui::Event> = Vec::new();
+            if i == 10 {
+                events.push(egui::Event::PointerMoved(target));
+            }
+            let env = Env { t, clock: "10:28:00".into(), today: "2026-10-28".into(), date: "10月28日 周三".into(), battery: Some(76), charging: true, cursor: None, idle_seconds: Some(0.0), ..Default::default() };
+            let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(640.0, 190.0))), time: Some(t), events, viewports: std::iter::once((egui::ViewportId::ROOT, egui::ViewportInfo { native_pixels_per_point: Some(2.0), ..Default::default() })).collect(), ..Default::default() };
+            let output = ctx.run(raw, |ctx| { egui::CentralPanel::default().frame(egui::Frame::new().fill(Color32::from_rgb(23, 28, 45))).show(ctx, |ui| { let win = ui.max_rect(); app.frame(ui, win, &env); }); });
+            ras.update_textures(&output.textures_delta);
+            if i == 36 {
+                let mut rgba = vec![];
+                ras.buf.fill([0.09, 0.11, 0.18, 1.0]);
+                ras.draw(&ctx.tessellate(output.shapes, output.pixels_per_point), output.pixels_per_point);
+                ras.to_rgba8(&mut rgba);
+                std::fs::write(format!("{dest}/hover-{name}.rgba"), &rgba).unwrap();
+                eprintln!("hover-{name} 已导出 → {dest}/hover-{name}.rgba");
+            }
+            ras.free_textures(&output.textures_delta);
+            frame_no += 1;
+        }
+    }
+    let _ = std::fs::remove_dir_all(root);
 }

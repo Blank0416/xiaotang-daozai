@@ -276,23 +276,23 @@ impl<'a> Card<'a> {
         (h, p)
     }
 
-    /// 悬停时才出现的「可点范围」提示：沿控件边缘走一圈流动虚线，外面套一层呼吸光晕。
+    /// 统一的按钮悬停：和「加一个 / 倒计时」胶囊一致——淡入一层按钮底色，不做描边。
+    /// hv 是 0..1 的平滑悬停量；clock 只为兼容旧调用保留。
     pub fn hover_frame(&self, hv: f32, x: f32, y: f32, w: f32, h: f32, r: f32, clock: f32) {
         if hv <= 0.01 {
             return;
         }
-        let tint = Color32::from_rgb(140, 190, 255);
-        self.dashed(x, y, w, h, r, 1.0, alpha(tint, 0.18 + 0.50 * hv), clock * 26.0);
-        let breathe = 0.5 - 0.5 * (clock * 2.2).cos();
-        let pad = 1.5 + 3.0 * breathe;
-        self.stroke(x - pad, y - pad, w + pad * 2.0, h + pad * 2.0, r + pad, 1.0, alpha(tint, hv * 0.30 * (1.0 - breathe)));
-        self.ui.ctx().request_repaint();
+        let _ = clock;
+        self.fill(x, y, w, h, r, alpha(theme::BTN_HOVER, 0.95 * hv.clamp(0.0, 1.0)));
     }
 
     /// `hover_frame` 的便捷版：给一个交互区，返回平滑后的悬停量（0..1），供文字/图标提亮。
     pub fn hover_tip(&self, r: &Response, x: f32, y: f32, w: f32, h: f32, radius: f32, clock: f32) -> f32 {
-        let (hv, _) = self.hover_t(r);
+        let (hv, pv) = self.hover_t(r);
         self.hover_frame(hv, x, y, w, h, radius, clock);
+        if pv > 0.01 {
+            self.fill(x, y, w, h, radius, alpha(Color32::BLACK, 0.28 * pv));
+        }
         hv
     }
 }
